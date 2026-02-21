@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+backend/venv/
+backend/.env
+
+# Node
+node_modules/
+
+# Storage (keep .gitkeep)
+backend/storage/*
+!backend/storage/.gitkeep
+
+# Custom templates (user-generated)
+backend/app/core/templates/custom/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Frontend build output
+frontend/dist/
+
+# Python packaging
+*.egg-info/
+build/
+dist/
+
+# Test cache
+.pytest_cache/
+
+# LaTeX temp files
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+# Debug comparison files
+test_doc/对比_*
