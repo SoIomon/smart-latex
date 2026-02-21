@@ -4,6 +4,8 @@ Strips/replaces commands that Pandoc cannot handle, extracts cover-page
 metadata so it can be rebuilt later by the post-processor.
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 
@@ -137,7 +139,13 @@ def _extract_preamble_metadata(preamble: str, metadata: WordExportMetadata) -> N
     for attr, cmd in _UCAS_FIELDS:
         m = re.search(rf"\\{cmd}\{{([^}}]*)\}}", preamble)
         if m:
-            setattr(metadata, attr, m.group(1).replace("~", " ").strip())
+            value = m.group(1).replace("~", " ").strip()
+            # ``\ADVISOR{Supervisor: ...}`` is common in ucas_thesis templates.
+            # Store the semantic value only, so front-matter builders can add
+            # locale-appropriate labels without duplicating ``Supervisor:``.
+            if attr == "advisor_en":
+                value = re.sub(r"^\s*supervisor\s*[:：]\s*", "", value, flags=re.IGNORECASE)
+            setattr(metadata, attr, value)
 
     # schoollogo: \schoollogo[scale=0.095]{ucas_logo}
     m = re.search(r"\\schoollogo(?:\[([^\]]*)\])?\{([^}]*)\}", preamble)
@@ -349,9 +357,9 @@ def _extract_page_numbering(body: str, metadata: WordExportMetadata) -> None:
 
     Must be called *before* ``_strip_thesis_frontmatter`` removes ``\mainmatter``.
     """
-    # Collect all \pagenumbering{X} in order
-    numberings = re.findall(r"\\pagenumbering\{(\w+)\}", body)
-    has_mainmatter = bool(re.search(r"\\mainmatter\b", body))
+    # Collect all \pagenumbering{X} in order (skip commented lines)
+    numberings = re.findall(r"^[^%\n]*\\pagenumbering\{(\w+)\}", body, re.MULTILINE)
+    has_mainmatter = bool(re.search(r"^[^%\n]*\\mainmatter\b", body, re.MULTILINE))
 
     if not numberings:
         return

@@ -344,24 +344,15 @@ class DeclarativeFrontmatterBuilder(FrontmatterBuilder):
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn as _qn
 
-        # Override profile values with auto-detected metadata
+        # Override profile values with auto-detected metadata.
+        # metadata fields are None when not detected → fall back to profile.
+        # metadata.twoside is False when not detected → fall back to profile.
         metadata = self._metadata
-        fm_fmt = getattr(metadata, 'frontmatter_page_format', None) or ph.frontmatter_page_format
-        body_fmt = getattr(metadata, 'body_page_format', None) or ph.body_page_format
+        _meta_fm = getattr(metadata, 'frontmatter_page_format', None)
+        _meta_body = getattr(metadata, 'body_page_format', None)
+        fm_fmt = _meta_fm if _meta_fm is not None else ph.frontmatter_page_format
+        body_fmt = _meta_body if _meta_body is not None else ph.body_page_format
         use_odd_even = metadata.twoside if getattr(metadata, 'twoside', False) else ph.odd_even
-
-        import logging as _logging
-        _log = _logging.getLogger(__name__)
-        _log.warning(
-            "[PAGE_DEBUG] metadata.fm=%s metadata.body=%s metadata.twoside=%s | "
-            "ph.fm=%s ph.body=%s ph.odd_even=%s | "
-            "RESOLVED fm_fmt=%s body_fmt=%s use_odd_even=%s",
-            getattr(metadata, 'frontmatter_page_format', 'N/A'),
-            getattr(metadata, 'body_page_format', 'N/A'),
-            getattr(metadata, 'twoside', 'N/A'),
-            ph.frontmatter_page_format, ph.body_page_format, ph.odd_even,
-            fm_fmt, body_fmt, use_odd_even,
-        )
 
         # Enable odd/even headers
         if use_odd_even:
@@ -391,14 +382,12 @@ class DeclarativeFrontmatterBuilder(FrontmatterBuilder):
 
         # Find the first *numbered chapter* section (body), skipping
         # unnumbered front-matter headings like 摘要, Abstract, 目录.
-        # Front-matter headings use \chapter* and match known titles;
-        # body chapters match patterns like "第 N 章".
+        # Read from profile.numbering.unnumbered_headings to stay in sync.
         _heading1_ids = {"Heading1", "LaTeXHeading1"}
-        _frontmatter_titles = {
-            "摘要", "摘 要", "abstract", "Abstract", "ABSTRACT",
-            "致谢", "参考文献", "附录", "目录", "目 录",
-            "References", "图形列表", "表格列表",
-        }
+        _unnumbered = set(self.profile.numbering.unnumbered_headings) if self.profile else set()
+        _frontmatter_titles = _unnumbered | {"图形列表", "表格列表"}
+        # Normalize whitespace in the title set for consistent matching
+        _frontmatter_titles = {re.sub(r"\s+", " ", t) for t in _frontmatter_titles}
         sections = list(doc.sections)
         first_body_idx = len(sections)  # default: no body found
         for si in range(cover_count, len(sections)):
@@ -428,11 +417,6 @@ class DeclarativeFrontmatterBuilder(FrontmatterBuilder):
 
         # Get document title for even-page headers
         doc_title = getattr(metadata, 'title', '') if metadata else ''
-
-        _log.warning(
-            "[PAGE_DEBUG] cover_count=%d first_body_idx=%d total_sections=%d",
-            cover_count, first_body_idx, len(sections),
-        )
 
         first_frontmatter = True
         first_body = True
