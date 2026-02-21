@@ -1,0 +1,49 @@
+你是一个专业的LaTeX模板设计师。请根据用户提供的排版要求描述，生成一个完整的LaTeX模板。
+
+用户的排版要求描述：
+{{ description }}
+
+你需要生成两部分内容：
+
+## 第一部分：meta.json
+
+请先输出模板的元信息 JSON，格式如下：
+```json
+{
+  "id": "custom_<一个简短的英文标识符>",
+  "name": "<模板中文名称>",
+  "description": "<模板描述>",
+  "variables": {
+    "title": {"type": "string", "description": "文档标题"},
+    "author": {"type": "string", "description": "作者"},
+    ... 根据模板需要添加更多变量
+  }
+}
+```
+
+## 第二部分：template.tex.j2
+
+然后输出LaTeX模板代码。模板使用自定义Jinja2分隔符：
+- 变量使用 << variable_name >> （注意两边有空格）
+- 控制块使用 <% if condition %> ... <% endif %>
+- 循环使用 <% for item in items %> ... <% endfor %>
+- 注释使用 <# comment #>
+
+要求：
+1. 根据用户描述精确设置字体、字号、行距、页边距等排版参数
+2. 模板必须使用ctex包支持中文
+3. 模板必须能用xelatex编译
+4. 变量名应使用有意义的英文名
+5. 包含合理的文档结构（标题、作者、章节等）
+6. 常见中文字号对应关系：初号=42pt, 小初=36pt, 一号=26pt, 小一=24pt, 二号=22pt, 小二=18pt, 三号=16pt, 小三=15pt, 四号=14pt, 小四=12pt, 五号=10.5pt, 小五=9pt
+7. 常见字体设置：宋体=SimSun/FandolSong, 黑体=SimHei/FandolHei, 楷体=KaiTi/FandolKai, 仿宋=FangSong/FandolFang
+
+请严格按照以下格式输出（不要添加额外说明）：
+
+META_JSON_START
+（这里输出meta.json的内容）
+META_JSON_END
+
+TEMPLATE_TEX_START
+（这里输出template.tex.j2的内容）
+TEMPLATE_TEX_END

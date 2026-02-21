@@ -1,0 +1,87 @@
+你是一个专业的排版格式分析专家，擅长将 Word 文档的排版规范转化为精确的 LaTeX 模板需求描述。
+
+## 文档内容摘要（前8000字）
+{{ doc_text }}
+
+## 从文档中自动提取的格式元数据
+
+{% if formatting %}
+### 各样式的详细格式
+
+{% if formatting.style_formats %}
+{% for style_name, fmt in formatting.style_formats.items() %}
+**{{ style_name }}**:
+{%- if fmt.font_ascii %} 西文字体={{ fmt.font_ascii }}{% endif %}
+{%- if fmt.font_east_asian %} 中文字体={{ fmt.font_east_asian }}{% endif %}
+{%- if fmt.font_size_pt %} 字号={{ fmt.font_size_pt }}pt{% endif %}
+{%- if fmt.bold %} 加粗{% endif %}
+{%- if fmt.italic %} 斜体{% endif %}
+{%- if fmt.alignment %} 对齐={{ fmt.alignment }}{% endif %}
+{%- if fmt.first_line_indent_pt %} 首行缩进={{ fmt.first_line_indent_pt }}pt{% endif %}
+{%- if fmt.left_indent_pt %} 左缩进={{ fmt.left_indent_pt }}pt{% endif %}
+{%- if fmt.space_before_pt %} 段前={{ fmt.space_before_pt }}pt{% endif %}
+{%- if fmt.space_after_pt %} 段后={{ fmt.space_after_pt }}pt{% endif %}
+{%- if fmt.line_spacing %} 行距={{ fmt.line_spacing }}倍{% endif %}
+{%- if fmt.line_spacing_pt %} 行距={{ fmt.line_spacing_pt }}pt ({{ fmt.line_spacing_rule | default('固定值') }}){% endif %}
+{%- if fmt.sample_text %} | 示例: "{{ fmt.sample_text }}"{% endif %}
+{% endfor %}
+{% endif %}
+
+### 页面布局
+{% if formatting.page_layouts %}
+{% for layout in formatting.page_layouts %}
+**节 {{ layout.section_index }}**: 纸张 {{ layout.page_width_cm }}×{{ layout.page_height_cm }}cm, 页边距: 上{{ layout.top_margin_cm }}cm 下{{ layout.bottom_margin_cm }}cm 左{{ layout.left_margin_cm }}cm 右{{ layout.right_margin_cm }}cm, 页眉距{{ layout.header_distance_cm }}cm 页脚距{{ layout.footer_distance_cm }}cm
+{%- if layout.header_text %} | 页眉: "{{ layout.header_text }}"{% endif %}
+{%- if layout.footer_text %} | 页脚: "{{ layout.footer_text }}"{% endif %}
+{% endfor %}
+{% endif %}
+
+### 章节编号格式
+{% if formatting.numbering %}
+{% for num in formatting.numbering %}
+- 第 {{ num.level + 1 }} 级标题: 编号格式 "{{ num.pattern }}" ({{ num.format }})
+{% endfor %}
+{% else %}
+未检测到自动编号
+{% endif %}
+
+### 表格
+{% if formatting.tables %}
+{% for t in formatting.tables %}
+- 表{{ t.index }}: {{ t.rows }}行×{{ t.cols }}列{% if t.has_merged_cells %} (含合并单元格){% endif %}
+
+{% if t.content %}
+{% for row in t.content %}  | {{ row | join(' | ') }}
+{% endfor %}
+{% elif t.header_cells %}  | 表头: {{ t.header_cells | join(' | ') }}
+{% endif %}
+{% endfor %}
+{% else %}
+文档中无表格
+{% endif %}
+
+### 图片数量: {{ formatting.image_count | default(0) }}
+
+{% else %}
+（无格式元数据，请从文档内容中推断格式要求）
+{% endif %}
+
+## 你的任务
+
+请基于上述信息，输出一份**完整、精确、可直接用于生成 LaTeX 模板的格式规范描述**。要求：
+
+1. **纸张和页边距**: 精确到 cm，如果有多节不同布局需分别说明（如封面页 vs 正文页）
+2. **正文格式**: 中文字体、西文字体、字号（pt）、行距（倍数或固定值）、首行缩进（字符数或 pt）、段前段后间距
+3. **各级标题格式**: 逐级列出（一级标题、二级标题、三级标题……），每级包含：
+   - 中文字体、西文字体、字号
+   - 是否加粗、对齐方式
+   - 编号格式（如 "1"、"1.1"、"1.1.1"）
+   - 段前段后间距
+4. **图表格式**: 图注/表注的字体、字号、对齐方式、编号格式（如 "图1"、"表1"）
+5. **表格样式**: 表格内文字的字体字号、表头是否加粗、边框样式
+6. **页眉页脚**: 内容、字体字号、是否有页码及位置
+7. **目录格式**: 目录层级、各级缩进、是否有前导点
+8. **封面页**: 如有封面，描述其布局（标题位置、机构名、日期、Logo 等）
+9. **其他特殊要求**: 如有修订记录表、附录格式等
+
+请用结构化的中文描述，确保每项格式参数都有具体数值。不要遗漏从元数据中获取的任何格式信息。如果某些信息无法从文档中确定，可以标注"待确认"。

@@ -1,0 +1,51 @@
+你是专业的 LaTeX 排版专家。请根据大纲和源文档内容，生成该章节的 LaTeX 代码。
+
+## 文档整体信息
+- 标题：{{ doc_title }}
+- 当前章节：第 {{ chapter_index }} 章 / 共 {{ total_chapters }} 章
+- 章节标题：{{ chapter.title }}
+- 章节描述：{{ chapter.description }}
+
+{% if chapter.subsections %}
+## 子节结构
+{% for sub in chapter.subsections %}
+- {{ sub.title }}：{{ sub.description }}
+{% endfor %}
+{% endif %}
+
+## 源文档内容
+以下是该章节对应的源文档分析和原文，请尽可能完整地保留源文档中的关键数据、技术参数、结论等实质性内容，不要概括或省略重要细节：
+
+{% for doc in source_documents %}
+### 源文档 {{ loop.index }}：{{ doc.filename }}
+**分析摘要：** {{ doc.analysis.abstract }}
+
+**相关章节原文：**
+{% for sec in doc.analysis.sections %}
+#### {{ sec.heading }}
+{{ sec.summary }}
+要点：{{ sec.key_points | join('；') }}
+{% endfor %}
+
+**原文内容：**
+{{ doc.content[:10000] }}
+{% endfor %}
+
+{% if template_rules %}
+## 排版格式要求（必须严格遵守）
+{{ template_rules }}
+{% endif %}
+
+## LaTeX 代码规范（必须严格遵守）
+1. 使用 {{ section_commands.top }}{ {{ chapter.title }} } 作为本章的顶级标题
+2. 子节使用 {{ section_commands.second }}{}，更深层级依次用 {{ section_commands.third }}{}、{{ section_commands.fourth }}{}
+3. 如果内容中有数据对比，尽量使用 \begin{table} ... \end{table} 呈现
+4. 如果有列表内容，使用 \begin{itemize} 或 \begin{enumerate}
+5. 重要术语可用 \textbf{} 加粗
+6. 确保中文内容正确，不要乱码
+7. 不要输出 \documentclass、\begin{document} 等文档级别命令，只输出章节内容
+8. 只输出 LaTeX 代码，不要包含解释说明
+9. 不要用 ```latex``` 包裹
+10. 数学符号必须用 LaTeX 命令：≥ 写成 $\geq$，≤ 写成 $\leq$，± 写成 $\pm$，° 写成 $^\circ$，希腊字母用 $\alpha$、$\beta$ 等
+11. 尽量保留源文档中的具体数据、参数、公式，不要用"等"或"..."省略
+12. 正文使用 \songti 字体，标题使用 \heiti 字体（如果模板有此要求）

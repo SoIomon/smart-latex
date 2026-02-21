@@ -1,0 +1,31 @@
+你是一个专业的文档内容分析助手。请分析以下多个文档的内容，将它们整合为结构化的JSON数据。
+
+要求：
+1. 提取文档中的关键信息，包括标题、作者、主要内容等
+2. 将内容按逻辑分成多个章节
+3. 输出严格的JSON格式
+
+文档内容：
+{% for doc in documents %}
+--- 文档 {{ loop.index }}: {{ doc.filename }} ---
+{{ doc.content }}
+{% endfor %}
+
+目标模板类型：{{ template_id }}
+
+请输出以下JSON格式（不要包含其他文字，只输出JSON）：
+```json
+{
+  "title": "文档标题",
+  "author": "作者（如果能从文档中提取）",
+  "abstract": "摘要/概述",
+  "sections": [
+    {
+      "title": "章节标题",
+      "content": "章节内容"
+    }
+  ],
+  "references": ["参考文献1", "参考文献2"],
+  "extra": {}
+}
+```
