@@ -1,0 +1,33 @@
+{
+  "id": "work_report",
+  "name": "工作报告",
+  "description": "标准工作报告模板，包含标题、作者、部门、概述、工作内容和总结",
+  "variables": {
+    "title": {"type": "string", "description": "报告标题"},
+    "author": {"type": "string", "description": "作者"},
+    "department": {"type": "string", "description": "部门"},
+    "summary": {"type": "string", "description": "工作概述"},
+    "sections": {"type": "array", "description": "工作内容章节"},
+    "conclusion": {"type": "string", "description": "总结与展望"}
+  },
+  "preview": "preview.png",
+  "docx_profile": {
+    "language": "zh-CN",
+    "labels": {
+      "abstract": "摘要",
+      "toc": "目  录",
+      "figure_prefix": "图",
+      "table_prefix": "表"
+    },
+    "fonts": {
+      "body_latin": "Times New Roman",
+      "body_east_asian": "STSong",
+      "heading_latin": "Times New Roman",
+      "heading_east_asian": "Heiti SC",
+      "monospace": "Courier New"
+    },
+    "styles": {
+      "normal": { "font_size_pt": 12, "first_line_indent_pt": 24 }
+    }
+  }
+}

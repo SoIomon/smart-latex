@@ -1,0 +1,378 @@
+% ============================================================================
+% 通信所最终报告模板 — 上海微小卫星工程中心
+% 严格对标 "通信所最终报告模板.docx" 的排版规范
+% 编译方式: XeLaTeX
+% ============================================================================
+\documentclass[12pt, a4paper, openany, fontset=none]{ctexrep}
+
+% ---------------------------------------------------------------------------
+% 宏包加载
+% ---------------------------------------------------------------------------
+\usepackage{geometry}          % 页面布局
+\usepackage{setspace}          % 行距控制
+\usepackage{titlesec}          % 标题格式
+\usepackage{titletoc}          % 目录格式
+\usepackage{caption}           % 图表标题
+\usepackage{tabularx}          % 弹性宽度表格
+\usepackage{array}             % 表格列类型扩展
+\usepackage{multirow}          % 跨行单元格
+\usepackage{makecell}          % 单元格内换行
+\usepackage{graphicx}          % 图片插入
+\usepackage{fontspec}          % 字体配置
+\usepackage{fancyhdr}          % 页眉页脚
+\usepackage{lastpage}          % 总页数引用
+\usepackage{hyperref}          % 超链接（目录可点击）
+\usepackage{bookmark}          % 书签
+\usepackage{enumitem}          % 列表格式
+\usepackage{amsmath}           % 数学公式
+\usepackage{booktabs}          % 三线表
+
+% ---------------------------------------------------------------------------
+% 字体配置（XeLaTeX）
+% ---------------------------------------------------------------------------
+\setmainfont{Times New Roman}
+\setCJKmainfont[BoldFont=Heiti SC]{STSong}
+\setCJKsansfont{Heiti SC}
+\setCJKmonofont{STSong}
+\newCJKfontfamily\heiti{Heiti SC}
+\newCJKfontfamily\songti{STSong}
+\newCJKfontfamily\fangsong{STSong}
+\newCJKfontfamily\kaiti{STSong}
+
+% ---------------------------------------------------------------------------
+% 超链接设置（去除彩色边框）
+% ---------------------------------------------------------------------------
+\hypersetup{
+  colorlinks=false,
+  pdfborder={0 0 0},
+  bookmarksnumbered=true,
+  bookmarksopen=true,
+}
+
+% ---------------------------------------------------------------------------
+% 页面布局 — 封面节（Section 1）
+% ---------------------------------------------------------------------------
+\geometry{
+  a4paper,
+  top=2.5cm, bottom=2.5cm,
+  left=2.8cm, right=2.8cm,
+  headheight=14pt,
+  headsep=0.5cm,
+  footskip=1.75cm,
+}
+
+% 正文节页面布局（在 \begin{document} 后切换）
+\newcommand{\mainpagegeometry}{%
+  \newgeometry{
+    top=2.54cm, bottom=2.54cm,
+    left=3.17cm, right=3.17cm,
+    headheight=14pt,
+    headsep=0.5cm,
+    footskip=1.75cm,
+  }%
+}
+
+% ---------------------------------------------------------------------------
+% 行距与段落
+% ---------------------------------------------------------------------------
+\onehalfspacing                           % 全局 1.5 倍行距
+\setlength{\parindent}{2em}               % 首行缩进 2 字符（≈24pt @12pt）
+\setlength{\parskip}{0pt plus 1pt}        % 段间距 0
+
+% ---------------------------------------------------------------------------
+% 章节编号格式 — 对应 docx numId=3 (abstractNumId=48)
+%   Level 0: "1"          → \thechapter
+%   Level 1: "1.1"        → \thesection
+%   Level 2: "1.1.1"      → \thesubsection
+%   Level 3: "1.1.1.1"    → \thesubsubsection
+%   Level 4: "1.1.1.1.1"  → \theparagraph
+%   Level 5: "1.1.1.1.1.1"→ \thesubparagraph
+% ---------------------------------------------------------------------------
+\setcounter{secnumdepth}{5}               % 编号深度到 subparagraph（第6级）
+\setcounter{tocdepth}{3}                   % 目录深度到 subsubsection（第3级）
+
+\renewcommand{\thechapter}{\arabic{chapter}}
+\renewcommand{\thesection}{\thechapter.\arabic{section}}
+\renewcommand{\thesubsection}{\thesection.\arabic{subsection}}
+\renewcommand{\thesubsubsection}{\thesubsection.\arabic{subsubsection}}
+\renewcommand{\theparagraph}{\thesubsubsection.\arabic{paragraph}}
+\renewcommand{\thesubparagraph}{\theparagraph.\arabic{subparagraph}}
+
+% ---------------------------------------------------------------------------
+% 各级标题样式 — 精确对标 docx Heading 1‑6
+% ---------------------------------------------------------------------------
+% 一级标题 (Heading 1): 黑体 + TNR 15pt, 段前6pt 段后6pt
+\titleformat{\chapter}
+  {\fontsize{15bp}{18bp}\selectfont\heiti\bfseries}
+  {\thechapter}{1em}{}
+\titlespacing*{\chapter}{0pt}{6bp}{6bp}
+
+% 二级标题 (Heading 2): 黑体 + TNR 15pt, 段前6pt 段后6pt
+\titleformat{\section}
+  {\fontsize{15bp}{18bp}\selectfont\heiti\bfseries}
+  {\thesection}{1em}{}
+\titlespacing*{\section}{0pt}{6bp}{6bp}
+
+% 三级标题 (Heading 3): 黑体 + TNR 14pt, 段前6pt 段后6pt
+\titleformat{\subsection}
+  {\fontsize{14bp}{16.8bp}\selectfont\heiti\bfseries}
+  {\thesubsection}{1em}{}
+\titlespacing*{\subsection}{0pt}{6bp}{6bp}
+
+% 四级标题 (Heading 4): 黑体 + TNR 12pt, 段前6pt 段后6pt
+\titleformat{\subsubsection}
+  {\fontsize{12bp}{14.4bp}\selectfont\heiti\bfseries}
+  {\thesubsubsection}{1em}{}
+\titlespacing*{\subsubsection}{0pt}{6bp}{6bp}
+
+% 五级标题 (Heading 5): 继承 Normal 12pt 加粗, 段前6pt 段后6pt
+\titleformat{\paragraph}[hang]
+  {\fontsize{12bp}{14.4bp}\selectfont\bfseries}
+  {\theparagraph}{1em}{}
+\titlespacing*{\paragraph}{0pt}{6bp}{6bp}
+
+% 六级标题 (Heading 6): 宋体 + TNR 12pt 不加粗, 首行缩进10pt
+\titleformat{\subparagraph}[hang]
+  {\fontsize{12bp}{14.4bp}\selectfont\songti\normalfont}
+  {\thesubparagraph}{1em}{}
+\titlespacing*{\subparagraph}{0pt}{0pt}{0pt}
+
+% ---------------------------------------------------------------------------
+% 图表标题格式 — 对标 KM-图注 / KM-表注
+%   黑体 10.5pt, 居中
+% ---------------------------------------------------------------------------
+\DeclareCaptionFont{heitismall}{\fontsize{10.5bp}{13bp}\selectfont\heiti}
+\captionsetup[figure]{
+  font=heitismall,
+  labelsep=space,
+  justification=centering,
+  skip=6pt,
+}
+\captionsetup[table]{
+  font=heitismall,
+  labelsep=space,
+  justification=centering,
+  skip=6pt,
+}
+\renewcommand{\figurename}{图}
+\renewcommand{\tablename}{表}
+
+% 表格内文字: 宋体, 居中 (KM-表格)
+\renewcommand{\arraystretch}{1.3}
+
+% ---------------------------------------------------------------------------
+% 目录格式 — 对标 toc 1/2/3 样式
+% ---------------------------------------------------------------------------
+\renewcommand{\contentsname}{\centerline{目\quad 录}}
+
+% toc 1: 黑体 12pt 加粗, 无缩进
+\titlecontents{chapter}
+  [0pt]
+  {\addvspace{2pt}\fontsize{12bp}{22bp}\selectfont\heiti\bfseries}
+  {\thecontentslabel\hspace{1em}}
+  {}
+  {\titlerule*[0.5em]{.}\contentspage}
+
+% toc 2: TNR 12pt, 缩进 24pt
+\titlecontents{section}
+  [24pt]
+  {\fontsize{12bp}{22bp}\selectfont}
+  {\thecontentslabel\hspace{1em}}
+  {}
+  {\titlerule*[0.5em]{.}\contentspage}
+
+% toc 3: TNR 12pt, 缩进 48pt
+\titlecontents{subsection}
+  [48pt]
+  {\fontsize{12bp}{22bp}\selectfont}
+  {\thecontentslabel\hspace{1em}}
+  {}
+  {\titlerule*[0.5em]{.}\contentspage}
+
+% ---------------------------------------------------------------------------
+% 页眉页脚
+% ---------------------------------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[C]{\thepage}
+
+% 封面页样式（无页眉页脚）
+\fancypagestyle{coverpage}{
+  \fancyhf{}
+  \renewcommand{\headrulewidth}{0pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+
+% 前言部分样式（罗马数字页码）
+\fancypagestyle{frontmatter}{
+  \fancyhf{}
+  \renewcommand{\headrulewidth}{0pt}
+  \fancyfoot[C]{\thepage}
+}
+
+% ============================================================================
+%                         文 档 开 始
+% ============================================================================
+\begin{document}
+
+% =============================== 封面页 ====================================
+\thispagestyle{coverpage}
+
+\begingroup
+% 封面页边距: 上下2.5cm 左右2.8cm（初始 geometry 已设置）
+
+\vspace*{-1cm}
+
+% --- 外框表格 ---
+\noindent
+\begin{tabular}{@{}p{1.8cm}|p{\dimexpr\textwidth-1.8cm-2\tabcolsep-\arrayrulewidth}@{}}
+\hline\hline
+% ---- 左侧: 会签栏 ----
+\vspace{0.3cm}
+\begin{minipage}[t]{1.6cm}
+\centering\heiti\small
+会\quad 签 \\[0.6cm]
+\rule{1.4cm}{0.4pt}\\[0.5cm]
+\rule{1.4cm}{0.4pt}\\[0.5cm]
+\rule{1.4cm}{0.4pt}\\[0.5cm]
+\rule{1.4cm}{0.4pt}\\[0.5cm]
+\rule{1.4cm}{0.4pt}\\[0.5cm]
+\rule{1.4cm}{0.4pt}
+\end{minipage}
+\vspace{0.3cm}
+&
+% ---- 右侧: 主体内容 ----
+\vspace{0.3cm}
+\begin{minipage}[t]{\dimexpr\textwidth-1.8cm-2\tabcolsep-\arrayrulewidth-0.5cm}
+
+% --- 文件编号/阶段标志/密级/页数 ---
+\begin{tabularx}{\linewidth}{@{}>{\heiti\small}l X@{}}
+  文件编号 & << doc_number | default('') >> \\
+  阶段标志 & << phase_mark | default('') >> \\
+  密\quad 级 & << classification | default('') >> \\
+  页\quad 数 & << page_count | default('') >> \\
+\end{tabularx}
+
+\vspace{1cm}
+
+% --- 报告名称 ---
+\begin{center}
+\begin{tabularx}{0.9\linewidth}{@{}>{\heiti\fontsize{14bp}{20bp}\selectfont}l X@{}}
+  名\quad 称 & {\fontsize{16bp}{22bp}\selectfont\heiti\bfseries << title >>} \\
+\end{tabularx}
+\end{center}
+
+\vspace{1cm}
+
+% --- 审批表: 编写/校对/审核/标审/批准 ---
+\begin{center}
+\begin{tabularx}{0.85\linewidth}{@{}|c|X|c|@{}}
+  \hline
+  \heiti 项目 & \centering\heiti 人员 & \heiti 日期 \tabularnewline
+  \hline
+  编写 & \centering << writer | default('') >> & << write_date | default('') >> \tabularnewline
+  \hline
+  校对 & \centering << proofreader | default('') >> & << proofread_date | default('') >> \tabularnewline
+  \hline
+  审核 & \centering << reviewer | default('') >> & << review_date | default('') >> \tabularnewline
+  \hline
+  标审 & \centering << standard_reviewer | default('') >> & << standard_review_date | default('') >> \tabularnewline
+  \hline
+  批准 & \centering << approver | default('') >> & << approve_date | default('') >> \tabularnewline
+  \hline
+\end{tabularx}
+\end{center}
+
+\vfill
+
+% --- 机构名称与日期 ---
+\begin{center}
+  {\fontsize{18bp}{24bp}\selectfont\heiti\bfseries << institute | default('上海微小卫星工程中心') >>}\\[1em]
+  {\fontsize{16bp}{22bp}\selectfont\heiti\bfseries << report_date | default('2025年11月') >>}
+\end{center}
+
+\vspace{0.5cm}
+\end{minipage}
+\\
+\hline\hline
+\end{tabular}
+
+\endgroup
+
+% ======================= 文档修改记录 + 目录 ================================
+\clearpage
+\mainpagegeometry
+\pagenumbering{Roman}
+\pagestyle{frontmatter}
+
+% --- 文档修改记录 ---
+\begin{center}
+  {\fontsize{12bp}{22bp}\selectfont\heiti\bfseries 文档修改记录}
+\end{center}
+
+\vspace{6pt}
+
+\noindent
+\begin{tabularx}{\linewidth}{|c|c|X|c|c|}
+  \hline
+  \heiti\small 版本 & \heiti\small 日期 & \centering\heiti\small 更改摘要 & \heiti\small 修改章节 & \heiti\small 备注 \tabularnewline
+  \hline
+  <% for rev in revision_records | default([]) %>
+  << rev.version | default('') >> & << rev.date | default('') >> & << rev.change_summary | default('') >> & << rev.modified_sections | default('') >> & << rev.remarks | default('') >> \tabularnewline
+  \hline
+  <% endfor %>
+  <% if not revision_records %>
+   &  &  &  &  \tabularnewline \hline
+   &  &  &  &  \tabularnewline \hline
+   &  &  &  &  \tabularnewline \hline
+   &  &  &  &  \tabularnewline \hline
+   &  &  &  &  \tabularnewline \hline
+   &  &  &  &  \tabularnewline \hline
+   &  &  &  &  \tabularnewline \hline
+  <% endif %>
+\end{tabularx}
+
+% --- 目录 ---
+\clearpage
+\tableofcontents
+
+% ============================== 正文 ========================================
+\clearpage
+\pagenumbering{arabic}
+\pagestyle{fancy}
+
+<# -------------------------------------------------------------------------
+    以下为正文区域。LLM 生成的章节内容从此处开始。
+    可用命令层级：
+      \chapter{...}         → 一级标题 (1)
+      \section{...}         → 二级标题 (1.1)
+      \subsection{...}      → 三级标题 (1.1.1)
+      \subsubsection{...}   → 四级标题 (1.1.1.1)
+      \paragraph{...}       → 五级标题 (1.1.1.1.1)
+      \subparagraph{...}    → 六级标题 (1.1.1.1.1.1)
+
+    图片插入示例：
+      \begin{figure}[htbp]
+        \centering
+        \includegraphics[width=0.8\linewidth]{图片文件名}
+        \caption{图注文字}
+        \label{fig:标签}
+      \end{figure}
+
+    表格插入示例：
+      \begin{table}[htbp]
+        \centering
+        \caption{表注文字}
+        \label{tab:标签}
+        \begin{tabularx}{\linewidth}{|c|X|X|X|}
+          \hline
+          \textbf{列1} & \textbf{列2} & \textbf{列3} & \textbf{列4} \\
+          \hline
+          数据 & 数据 & 数据 & 数据 \\
+          \hline
+        \end{tabularx}
+      \end{table}
+------------------------------------------------------------------------- #>
+
+\end{document}

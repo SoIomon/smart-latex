@@ -1,0 +1,49 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[UTF8]{ctex}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{setspace}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+
+\geometry{left=2.5cm, right=2.5cm, top=3cm, bottom=2.5cm}
+\onehalfspacing
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[C]{<< title >>}
+\fancyfoot[C]{\thepage}
+
+\begin{document}
+
+\begin{titlepage}
+\centering
+\vspace*{5cm}
+{\Huge\bfseries << title >>}\\[2em]
+{\Large 项目名称：<< project_name >>}\\[1em]
+{\Large 投标单位：<< company >>}\\[3em]
+{\large \today}
+\vfill
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{项目概述}
+<< overview >>
+
+<% for section in sections %>
+\section{<< section.title >>}
+<< section.content >>
+
+<% endfor %>
+
+\section{实施计划}
+<< timeline >>
+
+\section{预算说明}
+<< budget >>
+
+\end{document}

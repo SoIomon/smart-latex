@@ -1,0 +1,69 @@
+{
+  "id": "comm_research_report",
+  "name": "通信所最终报告模板",
+  "description": "上海微小卫星工程中心通信所最终报告专用LaTeX模板，包含完整封面审批表（文件编号/密级/会签/编写/校对/审核/标审/批准）、文档修改记录表、自动目录，支持六级标题自动编号、规范图表格式，适配XeLaTeX编译。",
+  "variables": {
+    "title": {"type": "string", "description": "报告名称（封面名称栏）"},
+    "author": {"type": "string", "description": "报告作者"},
+    "institute": {"type": "string", "description": "出具报告的机构", "default": "上海微小卫星工程中心"},
+    "report_date": {"type": "string", "description": "报告完成日期", "default": "2025年11月"},
+    "doc_number": {"type": "string", "description": "文件编号", "default": ""},
+    "phase_mark": {"type": "string", "description": "阶段标志", "default": ""},
+    "classification": {"type": "string", "description": "密级", "default": ""},
+    "page_count": {"type": "string", "description": "页数", "default": ""},
+    "writer": {"type": "string", "description": "编写人", "default": ""},
+    "write_date": {"type": "string", "description": "编写日期", "default": ""},
+    "proofreader": {"type": "string", "description": "校对人", "default": ""},
+    "proofread_date": {"type": "string", "description": "校对日期", "default": ""},
+    "reviewer": {"type": "string", "description": "审核人", "default": ""},
+    "review_date": {"type": "string", "description": "审核日期", "default": ""},
+    "standard_reviewer": {"type": "string", "description": "标审人", "default": ""},
+    "standard_review_date": {"type": "string", "description": "标审日期", "default": ""},
+    "approver": {"type": "string", "description": "批准人", "default": ""},
+    "approve_date": {"type": "string", "description": "批准日期", "default": ""},
+    "revision_records": {
+      "type": "array",
+      "description": "文档修订记录列表",
+      "items": {
+        "type": "object",
+        "properties": {
+          "version": {"type": "string", "description": "版本号"},
+          "date": {"type": "string", "description": "修订日期"},
+          "change_summary": {"type": "string", "description": "更改摘要"},
+          "modified_sections": {"type": "string", "description": "修改章节"},
+          "remarks": {"type": "string", "description": "备注"}
+        }
+      },
+      "default": [
+        {
+          "version": "V1.0",
+          "date": "2025-11-01",
+          "change_summary": "首次发布",
+          "modified_sections": "全部",
+          "remarks": ""
+        }
+      ]
+    }
+  },
+  "docx_profile": {
+    "language": "zh-CN",
+    "labels": {
+      "abstract": "摘要",
+      "toc": "目  录",
+      "figure_prefix": "图",
+      "table_prefix": "表",
+      "references": "参考文献"
+    },
+    "fonts": {
+      "body_latin": "Times New Roman",
+      "body_east_asian": "STSong",
+      "heading_latin": "Times New Roman",
+      "heading_east_asian": "Heiti SC",
+      "caption_east_asian": "Heiti SC",
+      "monospace": "Courier New"
+    },
+    "styles": {
+      "normal": { "font_size_pt": 12, "first_line_indent_pt": 24 }
+    }
+  }
+}

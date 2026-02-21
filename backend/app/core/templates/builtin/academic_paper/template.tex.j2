@@ -1,0 +1,42 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[UTF8]{ctex}
+\usepackage{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{setspace}
+
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+\onehalfspacing
+
+\title{<< title >>}
+\author{<< author >>}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+<< abstract >>
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+<% for section in sections %>
+\section{<< section.title >>}
+<< section.content >>
+
+<% endfor %>
+
+<% if references %>
+\begin{thebibliography}{99}
+<% for ref in references %>
+\bibitem{ref<< loop.index >>} << ref >>
+<% endfor %>
+\end{thebibliography}
+<% endif %>
+
+\end{document}

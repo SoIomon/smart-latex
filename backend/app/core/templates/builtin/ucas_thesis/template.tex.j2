@@ -1,0 +1,91 @@
+%---------------------------------------------------------------------------%
+%->> Document class declaration
+%---------------------------------------------------------------------------%
+\documentclass[twoside]{Style/ucasthesis}%
+%---------------------------------------------------------------------------%
+%->> Document settings
+%---------------------------------------------------------------------------%
+\usepackage[authoryear,list]{Style/artratex}% document settings
+\usepackage{Style/artracom}% user defined commands
+%---------------------------------------------------------------------------%
+%->> Titlepage information (inlined from Tex/Frontinfo.tex)
+%---------------------------------------------------------------------------%
+%-
+%-> 中文封面信息
+%-
+\confidential{}% 密级：只有涉密论文才填写
+\schoollogo[scale=0.095]{ucas_logo}% 校徽
+\title{<< title | default('学位论文标题') >>}% 论文中文题目
+\author{<< author | default('作者') >>}% 论文作者
+\advisor{<< advisor | default('导师姓名~职称~单位') >>}% 指导教师
+\degree{<< degree | default('硕士') >>}% 学位
+\degreetype{<< degreetype | default('理学') >>}% 学位类别
+\major{<< major | default('专业名称') >>}% 专业名称
+\institute{<< institute | default('培养单位') >>}% 院系名称
+\date{<< date | default('2025~年~6~月') >>}% 毕业日期
+%-
+%-> 英文封面信息
+%-
+\TITLE{<< title_en | default('Thesis Title') >>}% 英文题目
+\AUTHOR{<< author_en | default('Author') >>}% 英文作者
+\ADVISOR{<< advisor_en | default('Supervisor: Professor') >>}% 英文指导教师
+\DEGREE{<< degree_en | default('Master') >>}% 英文学位
+\DEGREETYPE{<< degreetype_en | default('Natural Science') >>}% 英文学位类别
+\MAJOR{<< major_en | default('Major') >>}% 英文专业
+\INSTITUTE{<< institute_en | default('Institute') >>}% 英文院系
+\DATE{<< date_en | default('June, 2025') >>}% 英文毕业日期
+%---------------------------------------------------------------------------%
+%->> Document content
+%---------------------------------------------------------------------------%
+\begin{document}
+%-
+%-> Frontmatter: title page, abstract, content list
+%-
+\frontmatter% initialize the environment
+%-
+%-> 生成封面
+%-
+\maketitle% 生成中文封面
+\MAKETITLE% 生成英文封面
+%-
+%-> 作者声明
+%-
+\makedeclaration% 生成声明页
+%-
+%-> 中文摘要
+%-
+\intobmk\chapter*{摘\quad 要}% 显示在书签但不显示在目录
+\setcounter{page}{1}% 开始页码
+\pagenumbering{Roman}% 页码符号
+
+<< abstract_zh | default('摘要内容') >>
+
+\keywords{<< keywords_zh | default('关键词') >>}% 中文关键词
+%-
+%-> 英文摘要
+%-
+\intobmk\chapter*{Abstract}% 显示在书签但不显示在目录
+
+<< abstract_en | default('Abstract content') >>
+
+\KEYWORDS{<< keywords_en | default('Keywords') >>}% 英文关键词
+%-
+%-> 目录
+%-
+{
+\linespread{1.2}% local line space
+\intobmk*{\cleardoublepage}{\contentsname}% add link to bookmark
+\tableofcontents% content catalog
+\intobmk*{\cleardoublepage}{\listfigurename}% add link to bookmark
+\listoffigures% figure catalog
+\intobmk*{\cleardoublepage}{\listtablename}% add link to bookmark
+\listoftables% table catalog
+}
+%-
+%-> Mainmatter
+%-
+\mainmatter% initialize the environment
+%---------------------------------------------------------------------------%
+%- Pipeline will append generated chapters here and close with \end{document}
+%---------------------------------------------------------------------------%
+\end{document}

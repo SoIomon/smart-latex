@@ -1,0 +1,35 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[UTF8]{ctex}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{setspace}
+\usepackage{enumitem}
+
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+\onehalfspacing
+
+\begin{document}
+
+\begin{center}
+{\LARGE\bfseries << title >>}\\[1em]
+{\large << author >> \quad << department >>}\\[0.5em]
+{\large \today}
+\end{center}
+
+\vspace{2em}
+
+\section*{概述}
+<< summary >>
+
+<% for section in sections %>
+\section{<< section.title >>}
+<< section.content >>
+
+<% endfor %>
+
+\section*{总结与展望}
+<< conclusion >>
+
+\end{document}

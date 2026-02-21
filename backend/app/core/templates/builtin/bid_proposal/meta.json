@@ -1,0 +1,34 @@
+{
+  "id": "bid_proposal",
+  "name": "投标方案",
+  "description": "投标/项目方案模板，包含项目概述、技术方案、实施计划、报价等",
+  "variables": {
+    "title": {"type": "string", "description": "方案标题"},
+    "company": {"type": "string", "description": "投标公司名称"},
+    "project_name": {"type": "string", "description": "项目名称"},
+    "overview": {"type": "string", "description": "项目概述"},
+    "sections": {"type": "array", "description": "方案章节"},
+    "timeline": {"type": "string", "description": "实施时间计划"},
+    "budget": {"type": "string", "description": "预算/报价说明"}
+  },
+  "preview": "preview.png",
+  "docx_profile": {
+    "language": "zh-CN",
+    "labels": {
+      "abstract": "摘要",
+      "toc": "目  录",
+      "figure_prefix": "图",
+      "table_prefix": "表"
+    },
+    "fonts": {
+      "body_latin": "Times New Roman",
+      "body_east_asian": "STSong",
+      "heading_latin": "Times New Roman",
+      "heading_east_asian": "Heiti SC",
+      "monospace": "Courier New"
+    },
+    "styles": {
+      "normal": { "font_size_pt": 12, "first_line_indent_pt": 24 }
+    }
+  }
+}

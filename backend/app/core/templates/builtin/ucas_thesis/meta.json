@@ -1,0 +1,165 @@
+{
+  "id": "ucas_thesis",
+  "name": "国科大学位论文",
+  "description": "中国科学院大学本/硕/博学位论文模板，基于 ucasthesis",
+  "support_dirs": ["Style", "Biblio", "Img"],
+  "doc_class_type": "book",
+  "variables": {
+    "title": {"type": "string", "description": "论文中文标题"},
+    "author": {"type": "string", "description": "作者姓名"},
+    "advisor": {"type": "string", "description": "导师信息（姓名+职称+单位）"},
+    "degree": {"type": "string", "description": "学位", "default": "硕士"},
+    "degreetype": {"type": "string", "description": "学位类型", "default": "理学"},
+    "major": {"type": "string", "description": "专业"},
+    "institute": {"type": "string", "description": "培养单位"},
+    "date": {"type": "string", "description": "完成日期", "default": "2025~年~6~月"},
+    "title_en": {"type": "string", "description": "English title", "default": ""},
+    "author_en": {"type": "string", "description": "Author name", "default": ""},
+    "advisor_en": {"type": "string", "description": "Advisor info", "default": ""},
+    "degree_en": {"type": "string", "description": "Degree", "default": "Master"},
+    "degreetype_en": {"type": "string", "description": "Degree type", "default": "Natural Science"},
+    "major_en": {"type": "string", "description": "Major", "default": ""},
+    "institute_en": {"type": "string", "description": "Institute", "default": ""},
+    "date_en": {"type": "string", "description": "Date in English", "default": "June, 2025"},
+    "abstract_zh": {"type": "string", "description": "中文摘要"},
+    "keywords_zh": {"type": "string", "description": "中文关键词"},
+    "abstract_en": {"type": "string", "description": "English abstract", "default": ""},
+    "keywords_en": {"type": "string", "description": "English keywords", "default": ""},
+    "sections": {"type": "array", "description": "章节列表"}
+  },
+  "docx_profile": {
+    "language": "zh-CN",
+
+    "labels": {
+      "abstract": "摘要",
+      "toc": "目  录",
+      "figure_prefix": "图",
+      "table_prefix": "表",
+      "references": "参考文献",
+      "toc_update_hint": "请右键点击此处，选择\"更新域\"以生成目录"
+    },
+
+    "numbering": {
+      "chapter_format": "第 {n} 章  {title}",
+      "section_format": "{chapter}.{section}  {title}",
+      "subsection_format": "{chapter}.{section}.{subsection}  {title}",
+      "subsubsection_format": "{chapter}.{section}.{subsection}.{subsubsection}  {title}",
+      "unnumbered_headings": ["摘要", "abstract", "Abstract", "ABSTRACT", "致谢", "参考文献", "附录", "目录", "目  录", "References"]
+    },
+
+    "fonts": {
+      "body_latin": "Times New Roman",
+      "body_east_asian": "STSong",
+      "heading_latin": "Times New Roman",
+      "heading_east_asian": "Heiti SC",
+      "caption_east_asian": "Heiti SC",
+      "monospace": "Courier New",
+      "cjk_font_commands": {
+        "heiti": "Heiti SC",
+        "songti": "STSong",
+        "kaiti": "Kaiti SC",
+        "fangsong": "STFangsong"
+      }
+    },
+
+    "styles": {
+      "normal": { "font_size_pt": 12, "first_line_indent_pt": 24 },
+      "headings": [
+        { "level": 1, "font_size_pt": 15, "bold": true },
+        { "level": 2, "font_size_pt": 15, "bold": true },
+        { "level": 3, "font_size_pt": 14, "bold": true },
+        { "level": 4, "font_size_pt": 12, "bold": true },
+        { "level": 5, "font_size_pt": 12, "bold": true },
+        { "level": 6, "font_size_pt": 12, "bold": false }
+      ],
+      "caption": { "font_size_pt": 10.5 }
+    },
+
+    "page_headers": {
+      "enable_styleref": true,
+      "header_font": "STSong",
+      "header_font_size_pt": 10.5,
+      "header_rule_pt": 0.8
+    },
+
+    "frontmatter": {
+      "sections": [
+        {
+          "id": "cn_cover",
+          "elements": [
+            { "type": "logo", "source": "school_logo", "space_before_pt": 50 },
+            { "type": "text", "content": "{degree}学位论文", "font": "Heiti SC", "size_pt": 28, "bold": true, "align": "center", "space_before_pt": 24 },
+            { "type": "text", "field": "title", "font": "Heiti SC", "size_pt": 16, "bold": true, "align": "center", "space_before_pt": 36 },
+            { "type": "info_table", "space_before_pt": 36, "rows": [
+              ["作者姓名", "{author}"],
+              ["指导教师", "{advisor}"],
+              ["学位类别", "{degreetype}{degree}"],
+              ["学科专业", "{major}"],
+              ["培养单位", "{institute}"]
+            ]},
+            { "type": "text", "field": "date", "font": "STSong", "size_pt": 12, "align": "center", "space_before_pt": 50 }
+          ],
+          "break_after": "oddPage"
+        },
+        {
+          "id": "en_cover",
+          "elements": [
+            { "type": "text", "field": "title_en", "font": "Times New Roman", "size_pt": 16, "bold": true, "align": "center", "space_before_pt": 80, "condition": "title_en" },
+            { "type": "boilerplate", "font": "Times New Roman", "size_pt": 12, "align": "center", "space_before_pt": 100, "rows": [
+              ["A thesis submitted to"],
+              ["University of Chinese Academy of Sciences"],
+              ["in partial fulfillment of the requirement for the degree of"],
+              ["{degree_en} of {degreetype_en}"]
+            ]},
+            { "type": "text", "content": "By {author_en}", "font": "Times New Roman", "size_pt": 12, "align": "center", "space_before_pt": 80, "condition": "author_en" },
+            { "type": "text", "content": "Supervisor: {advisor_en}", "font": "Times New Roman", "size_pt": 12, "align": "center", "condition": "advisor_en" },
+            { "type": "text", "field": "institute_en", "font": "Times New Roman", "size_pt": 12, "align": "center", "space_before_pt": 80, "condition": "institute_en" },
+            { "type": "text", "field": "date_en", "font": "Times New Roman", "size_pt": 12, "align": "center", "space_before_pt": 40, "condition": "date_en" }
+          ],
+          "break_after": "oddPage"
+        },
+        {
+          "id": "originality_declaration",
+          "elements": [
+            { "type": "text", "content": "中国科学院大学", "font": "Heiti SC", "size_pt": 14, "bold": true, "align": "center" },
+            { "type": "text", "content": "学位论文原创性声明", "font": "Heiti SC", "size_pt": 14, "bold": true, "align": "center" },
+            { "type": "spacer", "lines": 1 },
+            { "type": "text", "content": "本人郑重声明：所呈交的学位论文是本人在导师的指导下独立进行研究工作所取得的成果。尽我所知，除文中已经注明引用的内容外，本论文不包含任何其他个人或集体已经发表或撰写过的研究成果。对论文所涉及的研究工作做出贡献的其他个人和集体，均已在文中以明确方式标明或致谢。", "font": "STSong", "size_pt": 10.5 },
+            { "type": "spacer", "lines": 1 },
+            { "type": "text", "content": "作者签名：____________    日    期：____________", "font": "STSong", "size_pt": 10.5, "align": "center" },
+            { "type": "spacer", "lines": 3 }
+          ]
+        },
+        {
+          "id": "authorization_declaration",
+          "elements": [
+            { "type": "text", "content": "中国科学院大学", "font": "Heiti SC", "size_pt": 14, "bold": true, "align": "center" },
+            { "type": "text", "content": "学位论文授权使用声明", "font": "Heiti SC", "size_pt": 14, "bold": true, "align": "center" },
+            { "type": "spacer", "lines": 1 },
+            { "type": "text", "content": "本人完全了解并同意遵守中国科学院有关保存和使用学位论文的规定，即中国科学院有权保留送交学位论文的副本，允许该论文被查阅，可以按照学术研究公开原则和保护知识产权的原则公布该论文的全部或部分内容，可以采用影印、缩印或其他复制手段保存、汇编本学位论文。", "font": "STSong", "size_pt": 10.5 },
+            { "type": "spacer", "lines": 1 },
+            { "type": "text", "content": "涉密及延迟公开的学位论文在解密或延迟期后适用本声明。", "font": "STSong", "size_pt": 10.5 },
+            { "type": "spacer", "lines": 1 },
+            { "type": "signature_block", "font": "STSong", "size_pt": 10.5, "align": "center", "rows": [
+              ["作者签名：__________    导师签名：__________"],
+              ["日    期：__________    日    期：__________"]
+            ]}
+          ],
+          "break_after": "oddPage"
+        }
+      ],
+      "body_section_breaks": [
+        { "before_heading_text": "Abstract", "break_type": "oddPage" },
+        { "before_heading_pattern": "目.*录", "break_type": "oddPage" },
+        { "before_heading_text": "图形列表", "break_type": "oddPage" },
+        { "before_heading_text": "表格列表", "break_type": "oddPage" },
+        { "before_heading_pattern": "第\\s*\\d+\\s*章", "break_type": "oddPage", "first_only": false }
+      ],
+      "auto_toc": {
+        "insert_before_first_chapter": true,
+        "heading_text": "目  录",
+        "heading_font": "Heiti SC"
+      }
+    }
+  }
+}
