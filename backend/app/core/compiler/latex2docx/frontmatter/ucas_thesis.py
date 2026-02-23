@@ -120,9 +120,13 @@ class UcasThesisFrontmatter(FrontmatterBuilder):
                 space_before=Pt(80),
             ))
         if metadata.advisor_en:
+            prefix = (
+                self.profile.labels.advisor_en_prefix
+                if self.profile else "Supervisor: "
+            )
             advisor_text = metadata.advisor_en
-            if not advisor_text.lower().startswith("supervisor"):
-                advisor_text = f"Supervisor: {advisor_text}"
+            if prefix and not advisor_text.lower().startswith(prefix.strip().lower()):
+                advisor_text = f"{prefix}{advisor_text}"
             elements.append(make_paragraph(
                 advisor_text,
                 font_name="Times New Roman", font_size=Pt(12),

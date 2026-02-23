@@ -30,7 +30,7 @@ def postprocess_word(
     metadata: WordExportMetadata,
     template_id: str = "",
 ) -> None:
-    """Apply post-processing fixes to the Pandoc-generated Word document."""
+    """Apply generic post-processing fixes to a Word document."""
     doc = Document(str(docx_path))
 
     # Load profile for template-specific settings
@@ -42,11 +42,9 @@ def postprocess_word(
     _fix_list_bullets(doc)
     _fix_chapter_headings(doc, profile)
 
-    # Phase 2: structural changes that create new sections
-    if template_id == "ucas_thesis":
-        _rebuild_ucas_frontmatter(doc, metadata)
-        _fix_ucas_body_pagebreaks(doc)
-    elif metadata.has_cover:
+    # Phase 2: structural changes that create new sections.
+    # Template-specific front-matter is now handled by latex2docx builders.
+    if metadata.has_cover:
         _rebuild_cover_page(doc, metadata)
 
     if metadata.revision_records:
@@ -56,8 +54,6 @@ def postprocess_word(
     _fix_page_layout(doc, metadata)
     _fix_table_widths(doc)
     _add_page_numbers(doc)
-    if template_id == "ucas_thesis":
-        _add_page_headers(doc)
 
     # Tell Word to auto-update all fields (TOC, STYLEREF, PAGE) on open
     _enable_update_fields(doc)
@@ -196,19 +192,9 @@ def _fix_styles(doc: Document, profile=None) -> None:
                 for numPr in pPr.findall(qn("w:numPr")):
                     pPr.remove(numPr)
 
-    # Remove ALL numbering definitions from the document.  python-docx's
-    # default template ships with abstractNum/num entries that some Word
-    # versions auto-link to Heading styles, producing phantom dots/bullets.
-    # We render heading numbers and list prefixes as plain text, so the
-    # numbering part is not needed.
-    try:
-        numbering_part = doc.part.numbering_part
-        if numbering_part is not None:
-            numbering_el = numbering_part.element
-            for child in list(numbering_el):
-                numbering_el.remove(child)
-    except Exception:
-        pass
+    # Keep numbering definitions intact to preserve list semantics.
+    # Heading-related phantom bullets are handled by removing heading numPr
+    # instead of deleting the entire numbering subsystem.
 
 
 def _set_east_asian_font(style, font_name: str) -> None:
@@ -789,202 +775,6 @@ def _make_revision_table(records: list[dict]) -> OxmlElement:
     return tbl
 
 
-# ---------------------------------------------------------------------------
-# ucas_thesis: unified front-matter (cover + declaration + TOC)
-# ---------------------------------------------------------------------------
-
-def _rebuild_ucas_frontmatter(doc: Document, metadata: WordExportMetadata) -> None:
-    """Insert all ucas_thesis front-matter at the beginning in one pass.
-
-    Order: CN cover → (blank page via section break) → EN cover →
-           originality declaration → authorization declaration → TOC.
-    """
-    body = doc.element.body
-    first_element = body[0] if len(body) > 0 else None
-
-    elements = []
-
-    # ── 1. Chinese cover ───────────────────────────────────────────────
-    logo_elem = _make_logo_paragraph(doc, metadata)
-    if logo_elem is not None:
-        elements.append(logo_elem)
-        elements.append(_make_paragraph(""))
-
-    degree_word = metadata.degree or "硕士"
-    elements.append(_make_paragraph(
-        f"{degree_word}学位论文",
-        font_name="Heiti SC", font_size=Pt(28), bold=True,
-        alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-    ))
-    elements.append(_make_paragraph(""))
-    elements.append(_make_paragraph(""))
-
-    if metadata.title:
-        elements.append(_make_paragraph(
-            metadata.title,
-            font_name="Heiti SC", font_size=Pt(16), bold=True,
-            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-        ))
-    elements.append(_make_paragraph(""))
-    elements.append(_make_paragraph(""))
-
-    info_rows = [
-        ("作者姓名", metadata.author),
-        ("指导教师", metadata.advisor),
-        ("学位类别", f"{metadata.degreetype}{metadata.degree}" if metadata.degreetype else metadata.degree),
-        ("学科专业", metadata.major),
-        ("培养单位", metadata.institute),
-    ]
-    elements.append(_make_info_table(info_rows))
-    elements.append(_make_paragraph(""))
-
-    if metadata.date:
-        elements.append(_make_paragraph(
-            metadata.date,
-            font_name="STSong", font_size=Pt(12),
-            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-        ))
-
-    # Section break (odd page) — blank page in twoside layout
-    elements.append(_make_section_break("oddPage"))
-
-    # ── 2. English cover ───────────────────────────────────────────────
-    # Vertical spacing mimics LaTeX \stretch{} distribution:
-    # title → gap → boilerplate → gap → author/supervisor → gap → date
-    if metadata.title_en:
-        elements.append(_make_paragraph(
-            metadata.title_en,
-            font_name="Times New Roman", font_size=Pt(16), bold=True,
-            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-            space_before=Pt(80),
-        ))
-
-    boilerplate = [
-        "A thesis submitted to",
-        "University of Chinese Academy of Sciences",
-        "in partial fulfillment of the requirement for the degree of",
-        f"{metadata.degree_en} of {metadata.degreetype_en}" if metadata.degree_en else "",
-    ]
-    first_bp = True
-    for line in boilerplate:
-        if line:
-            elements.append(_make_paragraph(
-                line, font_name="Times New Roman", font_size=Pt(12),
-                alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-                space_before=Pt(100) if first_bp else None,
-            ))
-            first_bp = False
-
-    if metadata.author_en:
-        elements.append(_make_paragraph(
-            f"By {metadata.author_en}",
-            font_name="Times New Roman", font_size=Pt(12),
-            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-            space_before=Pt(80),
-        ))
-    if metadata.advisor_en:
-        advisor_text = metadata.advisor_en
-        if not advisor_text.lower().startswith("supervisor"):
-            advisor_text = f"Supervisor: {advisor_text}"
-        elements.append(_make_paragraph(
-            advisor_text,
-            font_name="Times New Roman", font_size=Pt(12),
-            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-        ))
-    if metadata.institute_en:
-        elements.append(_make_paragraph(
-            metadata.institute_en,
-            font_name="Times New Roman", font_size=Pt(12),
-            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-            space_before=Pt(80),
-        ))
-    if metadata.date_en:
-        elements.append(_make_paragraph(
-            metadata.date_en,
-            font_name="Times New Roman", font_size=Pt(12),
-            alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-            space_before=Pt(40),
-        ))
-
-    # oddPage section break — declaration starts on odd (recto) page
-    elements.append(_make_section_break("oddPage"))
-
-    # ── 3. Originality declaration ─────────────────────────────────────
-    elements.append(_make_paragraph(
-        "中国科学院大学",
-        font_name="Heiti SC", font_size=Pt(14), bold=True,
-        alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-    ))
-    elements.append(_make_paragraph(
-        "学位论文原创性声明",
-        font_name="Heiti SC", font_size=Pt(14), bold=True,
-        alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-    ))
-    elements.append(_make_paragraph(""))
-    elements.append(_make_paragraph(
-        "本人郑重声明：所呈交的学位论文是本人在导师的指导下独立进行研究工作所取得的成果。"
-        "尽我所知，除文中已经注明引用的内容外，本论文不包含任何其他个人或集体已经发表或撰写过的研究成果。"
-        "对论文所涉及的研究工作做出贡献的其他个人和集体，均已在文中以明确方式标明或致谢。",
-        font_name="STSong", font_size=Pt(10.5),
-    ))
-    elements.append(_make_paragraph(""))
-    elements.append(_make_paragraph(
-        "作者签名：____________    日    期：____________",
-        font_name="STSong", font_size=Pt(10.5),
-        alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-    ))
-    elements.append(_make_paragraph(""))
-    elements.append(_make_paragraph(""))
-    elements.append(_make_paragraph(""))
-
-    # ── 4. Authorization declaration ───────────────────────────────────
-    elements.append(_make_paragraph(
-        "中国科学院大学",
-        font_name="Heiti SC", font_size=Pt(14), bold=True,
-        alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-    ))
-    elements.append(_make_paragraph(
-        "学位论文授权使用声明",
-        font_name="Heiti SC", font_size=Pt(14), bold=True,
-        alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-    ))
-    elements.append(_make_paragraph(""))
-    elements.append(_make_paragraph(
-        "本人完全了解并同意遵守中国科学院有关保存和使用学位论文的规定，即中国科学院有权保留送交学位论文的副本，"
-        "允许该论文被查阅，可以按照学术研究公开原则和保护知识产权的原则公布该论文的全部或部分内容，"
-        "可以采用影印、缩印或其他复制手段保存、汇编本学位论文。",
-        font_name="STSong", font_size=Pt(10.5),
-    ))
-    elements.append(_make_paragraph(""))
-    elements.append(_make_paragraph(
-        "涉密及延迟公开的学位论文在解密或延迟期后适用本声明。",
-        font_name="STSong", font_size=Pt(10.5),
-    ))
-    elements.append(_make_paragraph(""))
-    elements.append(_make_paragraph(
-        "作者签名：__________    导师签名：__________",
-        font_name="STSong", font_size=Pt(10.5),
-        alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-    ))
-    elements.append(_make_paragraph(
-        "日    期：__________    日    期：__________",
-        font_name="STSong", font_size=Pt(10.5),
-        alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-    ))
-    # oddPage section break — TOC/abstract starts on odd (recto) page
-    elements.append(_make_section_break("oddPage"))
-
-    # ── Insert everything at position 0 ────────────────────────────────
-    if first_element is not None:
-        insert_idx = body.index(first_element)
-        for elem in elements:
-            body.insert(insert_idx, elem)
-            insert_idx += 1
-    else:
-        for elem in elements:
-            body.append(elem)
-
-
 def _make_toc_field_paragraph(
     hint_text: str = "请右键点击此处，选择\u201c更新域\u201d以生成目录",
 ) -> OxmlElement:
@@ -1216,62 +1006,6 @@ def _make_info_table(rows: list[tuple[str, str]]) -> OxmlElement:
 
 
 # ---------------------------------------------------------------------------
-# ucas_thesis: body section page breaks (摘要 / Abstract / TOC / body)
-# ---------------------------------------------------------------------------
-
-def _fix_ucas_body_pagebreaks(doc: Document) -> None:
-    """Insert oddPage section breaks between 摘要, Abstract, TOC, and body.
-
-    After calling this the document order becomes:
-    ... frontmatter → 摘要 → (oddPage) → Abstract → (oddPage) → 目录 → (oddPage) → 第1章 ...
-    """
-    import re as _re
-    body = doc.element.body
-
-    abstract_en_elem = None
-    first_chapter_elem = None
-
-    for para in doc.paragraphs:
-        is_heading1 = para.style and para.style.style_id == "Heading1"
-        if not is_heading1:
-            continue
-        text = para.text.strip()
-        if text.lower() == "abstract" and abstract_en_elem is None:
-            abstract_en_elem = para._element
-        elif _re.match(r"第\s*\d+\s*章", text) and first_chapter_elem is None:
-            first_chapter_elem = para._element
-
-    # 1. Insert oddPage section break before Abstract (ends 摘要 section)
-    if abstract_en_elem is not None:
-        try:
-            idx = list(body).index(abstract_en_elem)
-            body.insert(idx, _make_section_break("oddPage"))
-        except ValueError:
-            pass
-
-    # 2. Insert TOC section + oddPage before first chapter
-    if first_chapter_elem is not None:
-        try:
-            idx = list(body).index(first_chapter_elem)
-            # Build TOC elements in order; insert at idx so they appear before chapter
-            toc_elems = [
-                _make_section_break("oddPage"),   # end Abstract section
-                _make_paragraph(
-                    "目  录",
-                    font_name="Heiti SC", font_size=Pt(16), bold=True,
-                    alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
-                ),
-                _make_paragraph(""),
-                _make_toc_field_paragraph(),
-                _make_section_break("oddPage"),   # end TOC section, body starts on odd page
-            ]
-            for i, elem in enumerate(toc_elems):
-                body.insert(idx + i, elem)
-        except ValueError:
-            pass
-
-
-# ---------------------------------------------------------------------------
 # Chapter heading format fix
 # ---------------------------------------------------------------------------
 
@@ -1452,49 +1186,6 @@ def _fix_table_widths(doc: Document) -> None:
                     btm.set(qn("w:space"), "0")
                     btm.set(qn("w:color"), "000000")
                     tcBorders.append(btm)
-
-
-# ---------------------------------------------------------------------------
-# Page headers (ucas_thesis)
-# ---------------------------------------------------------------------------
-
-def _add_page_headers(doc: Document) -> None:
-    """Add page headers for ucas_thesis sections.
-
-    Expected section layout after all insertions:
-      0: CN cover  → no header
-      1: EN cover  → no header
-      2: Declarations → no header
-      3: 摘要      → header "摘  要"
-      4: Abstract   → header "Abstract"
-      5: TOC       → header "目  录"
-      6+: body     → header with STYLEREF (dynamic chapter title)
-    """
-    sections = list(doc.sections)
-    num_sections = len(sections)
-
-    # Map section index → static header text
-    header_map = {
-        3: "摘  要",
-        4: "Abstract",
-        5: "目  录",
-    }
-
-    for i, section in enumerate(sections):
-        if i < 3:
-            # Cover / declaration: remove headers
-            header = section.header
-            header.is_linked_to_previous = False
-            for p in header.paragraphs:
-                p.clear()
-            continue
-
-        if i in header_map:
-            _set_static_header(section, header_map[i])
-        elif i >= 6:
-            # Use STYLEREF for dynamic chapter headers in .docx (user needs
-            # to press Ctrl+A → F9 to update fields after opening in Word).
-            _set_styleref_header(section)
 
 
 def _set_static_header(section, text: str,
