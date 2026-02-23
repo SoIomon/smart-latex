@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -15,10 +14,9 @@ from app.core.compiler.engine import compile_latex
 from app.core.compiler.sandbox import create_sandbox, cleanup_sandbox
 from app.core.compiler.error_parser import parse_xelatex_log
 from app.core.compiler.word_preprocessor import preprocess_latex_for_word
-from app.core.compiler.word_postprocessor import postprocess_word
 from app.core.compiler.latex2docx import convert_latex_to_docx
 from app.core.llm.fix_agent import run_fix_agent_loop
-from app.core.templates.registry import get_template, get_template_support_dirs
+from app.core.templates.registry import get_template_support_dirs
 from app.dependencies import get_db, get_project
 from app.models.models import Project
 from app.services import project_service
@@ -226,95 +224,60 @@ def _map_fix_agent_event(event, attempt: int) -> dict | None:
     return None
 
 
-def _detect_top_level_division(project: Project, latex_content: str = "") -> str:
-    """Determine whether Pandoc should use 'chapter' or 'section' as top-level.
-
-    Checks template meta.json ``doc_class_type`` first, then falls back to
-    inspecting the LaTeX ``\\documentclass`` line.
-    """
-    # 1. Check template metadata
-    if project.template_id:
-        tmpl = get_template(project.template_id)
-        if tmpl:
-            dct = tmpl.get("doc_class_type", "")
-            if dct in ("book", "report"):
-                return "chapter"
-            if dct == "article":
-                return "section"
-
-    # 2. Inspect LaTeX content
-    if latex_content:
-        m = re.search(r"\\documentclass(?:\[[^\]]*\])?\{(\w+)\}", latex_content)
-        if m:
-            doc_class = m.group(1).lower()
-            if doc_class in ("ctexrep", "ctexbook", "report", "book"):
-                return "chapter"
-
-    return "section"
-
-
-def _find_reference_docx(project: Project) -> str | None:
-    """Find the best reference.docx for Pandoc Word export.
-
-    Priority: template-specific > generic fallback.
-    """
-    templates_dir = Path(__file__).resolve().parent.parent.parent / "core" / "templates"
-
-    # 1. Try template-specific reference.docx
-    template_id = project.template_id
-    if template_id:
-        for subdir in ("builtin", "custom"):
-            ref = templates_dir / subdir / template_id / "reference.docx"
-            if ref.exists():
-                return str(ref)
-
-    # 2. Generic fallback
-    generic = templates_dir / "reference.docx"
-    if generic.exists():
-        return str(generic)
-
-    return None
-
-
 @router.get("/projects/{project_id}/word")
 async def download_word(project: Project = Depends(get_project)):
     """Convert LaTeX to Word (.docx).
 
-    Uses the direct LaTeX→DOCX converter (no Pandoc). Falls back to the
-    legacy Pandoc pipeline if the direct conversion fails.
+    Semantic-first flow:
+    1) Compile LaTeX to refresh ``document.tex`` / ``document.aux``.
+    2) Convert with the direct LaTeX→DOCX engine.
     """
-    tex_path = (settings.storage_path / project.id / "output" / "build" / "document.tex").resolve()
-    if not str(tex_path).startswith(str(settings.storage_path.resolve())):
+    build_dir = (settings.storage_path / project.id / "output" / "build").resolve()
+    tex_path = (build_dir / "document.tex").resolve()
+    if not str(build_dir).startswith(str(settings.storage_path.resolve())):
         raise HTTPException(status_code=403, detail="Access denied.")
 
-    # Fallback: use project's latex_content if .tex file doesn't exist
-    if not tex_path.exists():
-        if not project.latex_content:
-            raise HTTPException(status_code=404, detail="No LaTeX content. Compile first.")
-        tex_path.parent.mkdir(parents=True, exist_ok=True)
-        tex_path.write_text(project.latex_content, encoding="utf-8")
+    latex_content = (project.latex_content or "").strip()
+    if not latex_content and tex_path.exists():
+        latex_content = tex_path.read_text(encoding="utf-8")
+    if not latex_content:
+        raise HTTPException(status_code=404, detail="No LaTeX content. Generate or edit LaTeX first.")
 
+    support_dirs = get_template_support_dirs(project.template_id) if project.template_id else []
+    compile_result = await compile_latex(
+        latex_content,
+        build_dir,
+        support_dirs=support_dirs or None,
+    )
+    if not compile_result.success:
+        err = (compile_result.errors[0] if compile_result.errors else "LaTeX compilation failed")[:500]
+        raise HTTPException(status_code=400, detail=f"LaTeX 编译失败，无法导出一致的 Word: {err}")
+    if not tex_path.exists():
+        raise HTTPException(status_code=500, detail="编译完成但未生成 document.tex")
+
+    # Use compiled source to stay aligned with PDF generation path.
     latex_content = tex_path.read_text(encoding="utf-8")
     template_id = project.template_id or ""
 
-    # Extract metadata (shared by both paths)
+    # Metadata extraction only; keep source unchanged for semantic conversion.
     _, metadata = preprocess_latex_for_word(latex_content, template_id)
 
     docx_path = tex_path.with_suffix(".docx")
 
-    # ── Try direct LaTeX→DOCX conversion ────────────────────────────────
     try:
+        build_frontmatter = _should_rebuild_frontmatter(latex_content, metadata)
         convert_latex_to_docx(
             latex_content=latex_content,
             output_path=docx_path,
             metadata=metadata,
             template_id=template_id,
             image_base_dir=tex_path.parent,
+            build_frontmatter=build_frontmatter,
+            strip_numbering_part=False,
         )
     except Exception as e:
-        logger.warning("Direct LaTeX→DOCX conversion failed, falling back to Pandoc: %s", e)
-        # ── Pandoc fallback ─────────────────────────────────────────────
-        await _pandoc_word_fallback(tex_path, latex_content, metadata, docx_path, project)
+        logger.exception("Direct LaTeX→DOCX conversion failed")
+        raise HTTPException(status_code=500, detail=f"Word 转换失败: {e}")
 
     if not docx_path.exists():
         raise HTTPException(status_code=500, detail="Word 文件生成失败")
@@ -327,63 +290,14 @@ async def download_word(project: Project = Depends(get_project)):
     )
 
 
-async def _pandoc_word_fallback(
-    tex_path: Path,
-    latex_content: str,
-    metadata,
-    docx_path: Path,
-    project: Project,
-):
-    """Legacy Pandoc-based Word export (fallback)."""
-    cleaned_content, metadata = preprocess_latex_for_word(
-        latex_content, project.template_id or ""
-    )
-
-    word_tex_path = tex_path.parent / "document_for_word.tex"
-    word_tex_path.write_text(cleaned_content, encoding="utf-8")
-
-    cmd = [
-        "pandoc", str(word_tex_path),
-        "-f", "latex",
-        "-t", "docx",
-        "-o", str(docx_path),
-        "--resource-path", str(tex_path.parent),
-        "--number-sections",
-    ]
-
-    top_div = _detect_top_level_division(project, latex_content)
-    cmd.extend(["--top-level-division", top_div])
-
-    ref_docx = _find_reference_docx(project)
-    if ref_docx:
-        cmd.extend(["--reference-doc", ref_docx])
-
-    lua_filter = (
-        Path(__file__).resolve().parent.parent.parent
-        / "core" / "compiler" / "pandoc_filters" / "smart_latex.lua"
-    )
-    if lua_filter.exists():
-        cmd.extend(["--lua-filter", str(lua_filter)])
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+def _should_rebuild_frontmatter(latex_content: str, _metadata) -> bool:
+    """Build front-matter only for command-driven LaTeX front-matter."""
+    return bool(
+        re.search(
+            r"\\(?:maketitle|MAKETITLE|makedeclaration|frontmatter)\b",
+            latex_content,
         )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
-        if proc.returncode != 0:
-            detail = stderr.decode(errors="replace")[:500] if stderr else "pandoc conversion failed"
-            raise HTTPException(status_code=500, detail=f"Word 转换失败: {detail}")
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Word 转换超时")
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="pandoc 未安装，无法导出 Word")
-
-    try:
-        postprocess_word(str(docx_path), metadata, project.template_id or "")
-    except Exception as e:
-        logger.warning("Word post-processing failed (returning Pandoc output): %s", e)
+    )
 
 
 @router.get("/projects/{project_id}/pdf")
