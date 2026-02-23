@@ -33,8 +33,13 @@
     "labels": {
       "abstract": "摘要",
       "toc": "目  录",
+      "list_of_figures": "图形列表",
+      "list_of_tables": "表格列表",
       "figure_prefix": "图",
       "table_prefix": "表",
+      "keywords_zh_prefix": "关键词：",
+      "keywords_en_prefix": "Keywords: ",
+      "advisor_en_prefix": "Supervisor: ",
       "references": "参考文献",
       "toc_update_hint": "请右键点击此处，选择\"更新域\"以生成目录"
     },
@@ -80,6 +85,62 @@
       "header_font": "STSong",
       "header_font_size_pt": 10.5,
       "header_rule_pt": 0.8
+    },
+
+    "preprocessor": {
+      "title_implies_cover": true,
+      "normalize_documentclass_map": {
+        "Style/ucasthesis": "ctexrep",
+        "ucasthesis": "ctexrep"
+      },
+      "preamble_metadata_fields": [
+        { "attr": "advisor", "command": "advisor" },
+        { "attr": "degree", "command": "degree" },
+        { "attr": "degreetype", "command": "degreetype" },
+        { "attr": "major", "command": "major" },
+        { "attr": "institute", "command": "institute" },
+        { "attr": "date", "command": "date" },
+        { "attr": "title_en", "command": "TITLE" },
+        { "attr": "author_en", "command": "AUTHOR" },
+        {
+          "attr": "advisor_en",
+          "command": "ADVISOR",
+          "strip_prefix_regex": "^\\s*supervisor\\s*[:：]\\s*"
+        },
+        { "attr": "degree_en", "command": "DEGREE" },
+        { "attr": "degreetype_en", "command": "DEGREETYPE" },
+        { "attr": "major_en", "command": "MAJOR" },
+        { "attr": "institute_en", "command": "INSTITUTE" },
+        { "attr": "date_en", "command": "DATE" }
+      ],
+      "remove_preamble_commands_with_arg": [
+        "confidential",
+        "schoollogo",
+        "advisor",
+        "degree",
+        "degreetype",
+        "major",
+        "institute",
+        "TITLE",
+        "AUTHOR",
+        "ADVISOR",
+        "DEGREE",
+        "DEGREETYPE",
+        "MAJOR",
+        "INSTITUTE",
+        "DATE"
+      ],
+      "strip_body_commands": [
+        "frontmatter",
+        "mainmatter",
+        "backmatter",
+        "maketitle",
+        "MAKETITLE",
+        "makedeclaration",
+        "listoffigures",
+        "listoftables",
+        "tableofcontents"
+      ]
     },
 
     "frontmatter": {

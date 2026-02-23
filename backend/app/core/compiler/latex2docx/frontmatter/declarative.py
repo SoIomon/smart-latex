@@ -294,14 +294,17 @@ class DeclarativeFrontmatterBuilder(FrontmatterBuilder):
         body = doc.element.body
         first_chapter_elem = None
         toc_exists = False
+        chapter_pattern = self.profile.page_headers.chapter_pattern if self.profile else r"^$"
+        toc_compact = re.sub(r"\s+", "", auto_toc.heading_text)
 
         for para in doc.paragraphs:
             text = para.text.strip()
             is_heading1 = para.style and para.style.style_id == "Heading1"
+            compact = re.sub(r"\s+", "", text)
 
-            if "目" in text and "录" in text:
+            if compact == toc_compact:
                 toc_exists = True
-            elif is_heading1 and re.match(r"第\s*\d+\s*章", text) and first_chapter_elem is None:
+            elif is_heading1 and re.match(chapter_pattern, text) and first_chapter_elem is None:
                 first_chapter_elem = para._element
 
         if toc_exists or first_chapter_elem is None:
@@ -385,9 +388,18 @@ class DeclarativeFrontmatterBuilder(FrontmatterBuilder):
         # Read from profile.numbering.unnumbered_headings to stay in sync.
         _heading1_ids = {"Heading1", "LaTeXHeading1"}
         _unnumbered = set(self.profile.numbering.unnumbered_headings) if self.profile else set()
-        _frontmatter_titles = _unnumbered | {"图形列表", "表格列表"}
-        # Normalize whitespace in the title set for consistent matching
-        _frontmatter_titles = {re.sub(r"\s+", " ", t) for t in _frontmatter_titles}
+        _frontmatter_titles = _unnumbered
+        if self.profile:
+            _frontmatter_titles |= {
+                self.profile.labels.toc,
+                self.profile.labels.list_of_figures,
+                self.profile.labels.list_of_tables,
+            }
+        # Compare with whitespace removed so variants like "摘  要"/"目  录"
+        # match profile values "摘要"/"目录".
+        _frontmatter_titles_compact = {
+            re.sub(r"\s+", "", t) for t in _frontmatter_titles
+        }
         sections = list(doc.sections)
         first_body_idx = len(sections)  # default: no body found
         for si in range(cover_count, len(sections)):
@@ -405,9 +417,8 @@ class DeclarativeFrontmatterBuilder(FrontmatterBuilder):
                 # Found a Heading1 — check if it's a front-matter title
                 texts = [t.text for t in elem.iter(_qn("w:t")) if t.text]
                 heading_text = "".join(texts).strip()
-                # Normalize whitespace for matching (e.g. "摘  要" → "摘 要")
-                normalized = re.sub(r"\s+", " ", heading_text)
-                if normalized in _frontmatter_titles:
+                compact = re.sub(r"\s+", "", heading_text)
+                if compact in _frontmatter_titles_compact:
                     break  # skip this section, it's front-matter
                 # This is a real body chapter heading
                 first_body_idx = si

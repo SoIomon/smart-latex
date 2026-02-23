@@ -84,6 +84,8 @@ def preprocess_latex_for_word(
     Returns ``(cleaned_content, metadata)``.
     """
     metadata = WordExportMetadata(template_id=template_id)
+    from app.core.compiler.latex2docx.profile import load_profile
+    profile = load_profile(template_id)
 
     # Split into preamble and body at the *real* \begin{document}
     # (not one inside a LaTeX % comment)
@@ -100,14 +102,14 @@ def preprocess_latex_for_word(
 
     # ── Extract metadata from preamble ──────────────────────────────────
     _extract_geometry(preamble, metadata)
-    _extract_preamble_metadata(preamble, metadata)
+    _extract_preamble_metadata(preamble, metadata, profile)
 
     # ── Process preamble ────────────────────────────────────────────────
-    preamble = _normalize_documentclass(preamble)
-    preamble = _clean_preamble(preamble)
+    preamble = _normalize_documentclass(preamble, profile)
+    preamble = _clean_preamble(preamble, profile)
 
     # ── Process body ────────────────────────────────────────────────────
-    body = _process_body(body, metadata)
+    body = _process_body(body, metadata, profile)
 
     # Clean up excessive blank lines
     result = preamble + body
@@ -119,7 +121,7 @@ def preprocess_latex_for_word(
 # Preamble processing
 # ---------------------------------------------------------------------------
 
-def _extract_preamble_metadata(preamble: str, metadata: WordExportMetadata) -> None:
+def _extract_preamble_metadata(preamble: str, metadata: WordExportMetadata, profile) -> None:
     """Extract title/author/date from standard LaTeX preamble commands."""
     m = re.search(r"(?<!%)\\title\{(.*?)\}%?", preamble, re.DOTALL)
     if m:
@@ -128,24 +130,15 @@ def _extract_preamble_metadata(preamble: str, metadata: WordExportMetadata) -> N
     if m:
         metadata.author = re.sub(r"[{}]", "", m.group(1)).strip()
 
-    # ucas_thesis-specific fields
-    _UCAS_FIELDS = [
-        ("advisor", "advisor"), ("degree", "degree"), ("degreetype", "degreetype"),
-        ("major", "major"), ("institute", "institute"), ("date", "date"),
-        ("title_en", "TITLE"), ("author_en", "AUTHOR"), ("advisor_en", "ADVISOR"),
-        ("degree_en", "DEGREE"), ("degreetype_en", "DEGREETYPE"),
-        ("major_en", "MAJOR"), ("institute_en", "INSTITUTE"), ("date_en", "DATE"),
-    ]
-    for attr, cmd in _UCAS_FIELDS:
-        m = re.search(rf"\\{cmd}\{{([^}}]*)\}}", preamble)
+    for rule in profile.preprocessor.preamble_metadata_fields:
+        if not rule.attr or not rule.command:
+            continue
+        m = re.search(rf"\\{rule.command}\{{([^}}]*)\}}", preamble)
         if m:
             value = m.group(1).replace("~", " ").strip()
-            # ``\ADVISOR{Supervisor: ...}`` is common in ucas_thesis templates.
-            # Store the semantic value only, so front-matter builders can add
-            # locale-appropriate labels without duplicating ``Supervisor:``.
-            if attr == "advisor_en":
-                value = re.sub(r"^\s*supervisor\s*[:：]\s*", "", value, flags=re.IGNORECASE)
-            setattr(metadata, attr, value)
+            if rule.strip_prefix_regex:
+                value = re.sub(rule.strip_prefix_regex, "", value, flags=re.IGNORECASE)
+            setattr(metadata, rule.attr, value)
 
     # schoollogo: \schoollogo[scale=0.095]{ucas_logo}
     m = re.search(r"\\schoollogo(?:\[([^\]]*)\])?\{([^}]*)\}", preamble)
@@ -163,28 +156,23 @@ def _extract_preamble_metadata(preamble: str, metadata: WordExportMetadata) -> N
         if re.search(r"\btwoside\b", opts):
             metadata.twoside = True
 
-    if metadata.template_id == "ucas_thesis" and metadata.title:
+    if profile.preprocessor.title_implies_cover and metadata.title:
         metadata.has_cover = True
 
 
-def _normalize_documentclass(preamble: str) -> str:
+def _normalize_documentclass(preamble: str, profile) -> str:
     """Replace custom documentclass with a standard one Pandoc can handle."""
-    # Map custom classes to standard equivalents
-    _CUSTOM_CLASSES = {
-        "Style/ucasthesis": "ctexrep",
-        "ucasthesis": "ctexrep",
-    }
     m = re.search(r"\\documentclass(?:\[([^\]]*)\])?\{([^}]+)\}", preamble)
     if not m:
         return preamble
     doc_class = m.group(2)
-    replacement = _CUSTOM_CLASSES.get(doc_class)
+    replacement = profile.preprocessor.normalize_documentclass_map.get(doc_class)
     if replacement:
         preamble = preamble[: m.start()] + f"\\documentclass[12pt,a4paper]{{{replacement}}}" + preamble[m.end() :]
     return preamble
 
 
-def _clean_preamble(preamble: str) -> str:
+def _clean_preamble(preamble: str, profile) -> str:
     """Remove preamble commands that Pandoc cannot handle."""
 
     # Remove custom Style/ packages (ucas_thesis, etc.)
@@ -200,14 +188,7 @@ def _clean_preamble(preamble: str) -> str:
             rf"\\usepackage(?:\[[^\]]*\])?\{{{pkg}\}}[^\n]*\n?", "", preamble
         )
 
-    # ucas_thesis custom preamble commands (with brace arguments)
-    _PREAMBLE_CMDS_WITH_ARG = [
-        "confidential", "schoollogo", "advisor", "degree", "degreetype",
-        "major", "institute",
-        "TITLE", "AUTHOR", "ADVISOR", "DEGREE", "DEGREETYPE", "MAJOR",
-        "INSTITUTE", "DATE",
-    ]
-    for cmd in _PREAMBLE_CMDS_WITH_ARG:
+    for cmd in profile.preprocessor.remove_preamble_commands_with_arg:
         preamble = re.sub(rf"\\{cmd}(?:\[[^\]]*\])?\{{[^}}]*\}}[^\n]*\n?", "", preamble)
 
     # CJK font declarations
@@ -383,20 +364,20 @@ def _extract_page_numbering(body: str, metadata: WordExportMetadata) -> None:
 # Body processing
 # ---------------------------------------------------------------------------
 
-def _process_body(body: str, metadata: WordExportMetadata) -> str:
+def _process_body(body: str, metadata: WordExportMetadata, profile) -> str:
     """Clean the document body for Pandoc."""
 
     # ── Extract cover page (comm_research_report) ───────────────────────
-    body = _extract_cover_page(body, metadata)
+    body = _extract_cover_page(body, metadata, profile)
 
     # ── Extract revision records ────────────────────────────────────────
-    body = _extract_revision_records(body, metadata)
+    body = _extract_revision_records(body, metadata, profile)
 
     # ── Extract page numbering (before strip removes \mainmatter) ──────
     _extract_page_numbering(body, metadata)
 
     # ── Remove thesis front-matter commands (ucas_thesis etc.) ──────────
-    body = _strip_thesis_frontmatter(body)
+    body = _strip_thesis_frontmatter(body, profile)
 
     # ── Replace font commands ───────────────────────────────────────────
     body = _replace_font_commands(body)
@@ -413,12 +394,10 @@ def _process_body(body: str, metadata: WordExportMetadata) -> str:
     return body
 
 
-def _strip_thesis_frontmatter(body: str) -> str:
+def _strip_thesis_frontmatter(body: str, profile) -> str:
     """Remove thesis-specific front-matter commands (ucas_thesis etc.)."""
     # Standalone commands (no arguments)
-    for cmd in ("frontmatter", "mainmatter", "backmatter",
-                "maketitle", "MAKETITLE", "makedeclaration",
-                "listoffigures", "listoftables", "tableofcontents"):
+    for cmd in profile.preprocessor.strip_body_commands:
         body = re.sub(rf"\\{cmd}\b[^\n]*\n?", "", body)
 
     # \intobmk\chapter*{...} → \chapter*{...}  (strip prefix, keep \chapter)
@@ -428,51 +407,77 @@ def _strip_thesis_frontmatter(body: str) -> str:
     body = re.sub(r"\\intobmk\s*(?=\\chapter)", "", body)
 
     # \keywords{...} / \KEYWORDS{...} → bold line
-    body = re.sub(r"\\keywords\{([^}]*)\}", r"\\textbf{关键词：}\1", body)
-    body = re.sub(r"\\KEYWORDS\{([^}]*)\}", r"\\textbf{Keywords: }\1", body)
+    zh_prefix = profile.labels.keywords_zh_prefix
+    en_prefix = profile.labels.keywords_en_prefix
+    body = re.sub(
+        r"\\keywords\{([^}]*)\}",
+        lambda m: f"\\textbf{{{zh_prefix}}}{m.group(1)}",
+        body,
+    )
+    body = re.sub(
+        r"\\KEYWORDS\{([^}]*)\}",
+        lambda m: f"\\textbf{{{en_prefix}}}{m.group(1)}",
+        body,
+    )
 
     # \cleardoublepage inside groups
     body = re.sub(r"\\cleardoublepage\b", r"\\clearpage", body)
 
     # \contentsname / \listfigurename / \listtablename standalone refs
-    body = re.sub(r"\{\\contentsname\}", "{目录}", body)
-    body = re.sub(r"\{\\listfigurename\}", "{图目录}", body)
-    body = re.sub(r"\{\\listtablename\}", "{表目录}", body)
+    body = re.sub(
+        r"\{\\contentsname\}",
+        lambda _m: f"{{{profile.labels.toc}}}",
+        body,
+    )
+    body = re.sub(
+        r"\{\\listfigurename\}",
+        lambda _m: f"{{{profile.labels.list_of_figures}}}",
+        body,
+    )
+    body = re.sub(
+        r"\{\\listtablename\}",
+        lambda _m: f"{{{profile.labels.list_of_tables}}}",
+        body,
+    )
 
     return body
 
 
-def _extract_cover_page(body: str, metadata: WordExportMetadata) -> str:
+def _extract_cover_page(body: str, metadata: WordExportMetadata, profile) -> str:
     """Extract complex cover page content and save metadata."""
-    # Only extract if this looks like a comm_research_report-style cover
-    if "\\begingroup" not in body:
+    cover_cfg = profile.preprocessor.cover
+    if not cover_cfg.enabled:
         return body
 
     # Find the cover region: \begingroup ... \endgroup
-    bg_match = re.search(r"\\begingroup", body)
-    eg_match = re.search(r"\\endgroup", body)
-    if not bg_match or not eg_match:
+    bg_match = re.search(cover_cfg.block_start, body)
+    if not bg_match:
         return body
+    rel_eg_match = re.search(cover_cfg.block_end, body[bg_match.end() :])
+    if not rel_eg_match:
+        return body
+    eg_abs_end = bg_match.end() + rel_eg_match.end()
 
-    cover_text = body[bg_match.start() : eg_match.end()]
+    cover_text = body[bg_match.start() : eg_abs_end]
 
     # Check it looks like a cover page (has approval table markers)
-    if "编写" not in cover_text and "批准" not in cover_text:
+    if cover_cfg.detection_markers and not any(m in cover_text for m in cover_cfg.detection_markers):
         return body
 
-    _parse_cover_metadata(cover_text, metadata)
+    _parse_cover_metadata(cover_text, metadata, profile)
     metadata.has_cover = True
 
     # Remove the cover block from body
-    body = body[: bg_match.start()] + body[eg_match.end() :]
+    body = body[: bg_match.start()] + body[eg_abs_end:]
     # Also remove any \thispagestyle{coverpage} and \vspace before it
     body = re.sub(r"\\thispagestyle\{coverpage\}", "", body)
 
     return body
 
 
-def _parse_cover_metadata(cover_text: str, metadata: WordExportMetadata) -> None:
+def _parse_cover_metadata(cover_text: str, metadata: WordExportMetadata, profile) -> None:
     """Extract structured data from cover-page LaTeX."""
+    cover_cfg = profile.preprocessor.cover
 
     def _clean(text: str) -> str:
         text = re.sub(r"\\(?:heiti|songti|fangsong|kaiti|bfseries|normalfont|selectfont|centering)\b", "", text)
@@ -482,63 +487,43 @@ def _parse_cover_metadata(cover_text: str, metadata: WordExportMetadata) -> None
         text = re.sub(r"[{}]", "", text)
         return text.strip()
 
-    # Field-value pairs in metadata table
-    field_map = {
-        "文件编号": "doc_number",
-        "阶段标志": "phase_mark",
-    }
-    for label, attr in field_map.items():
-        m = re.search(rf"{label}\s*&\s*(.*?)\\\\", cover_text)
+    for attr, pattern in cover_cfg.field_patterns.items():
+        m = re.search(pattern, cover_text, re.DOTALL)
         if m:
             setattr(metadata, attr, _clean(m.group(1)))
 
-    # Fields with \quad
-    m = re.search(r"密\s*\\quad\s*级\s*&\s*(.*?)\\\\", cover_text)
-    if m:
-        metadata.classification = _clean(m.group(1))
-    m = re.search(r"页\s*\\quad\s*数\s*&\s*(.*?)\\\\", cover_text)
-    if m:
-        metadata.page_count = _clean(m.group(1))
-
-    # Title — extract cell content between & and \\
-    m = re.search(r"名\s*\\quad\s*称\s*&\s*(.*?)\\\\", cover_text, re.DOTALL)
-    if m:
-        metadata.title = _clean(m.group(1))
-
     # Approval table
-    approval_fields = [
-        ("编写", "writer", "write_date"),
-        ("校对", "proofreader", "proofread_date"),
-        ("审核", "reviewer", "review_date"),
-        ("标审", "standard_reviewer", "standard_review_date"),
-        ("批准", "approver", "approve_date"),
-    ]
-    for label, name_attr, date_attr in approval_fields:
+    for item in cover_cfg.approval_fields:
+        if not item.label:
+            continue
         m = re.search(
-            rf"{label}\s*&\s*\\centering\s*(.*?)\s*&\s*(.*?)\s*\\tabularnewline",
+            rf"{item.label}\s*&\s*\\centering\s*(.*?)\s*&\s*(.*?)\s*\\tabularnewline",
             cover_text,
         )
         if m:
-            setattr(metadata, name_attr, _clean(m.group(1)))
-            setattr(metadata, date_attr, _clean(m.group(2)))
+            if item.name_attr:
+                setattr(metadata, item.name_attr, _clean(m.group(1)))
+            if item.date_attr:
+                setattr(metadata, item.date_attr, _clean(m.group(2)))
 
     # Institute (large font near bottom)
-    m = re.search(r"\\fontsize\{18bp\}[^}]*\}\\selectfont\\heiti\\bfseries\s+(.*?)(?:\}|\\\\)", cover_text, re.DOTALL)
-    if m:
+    m = re.search(cover_cfg.institute_pattern, cover_text, re.DOTALL)
+    if m and hasattr(metadata, "institute"):
         metadata.institute = _clean(m.group(1))
 
     # Date (second large font near bottom)
     vfill_pos = cover_text.rfind("\\vfill")
     if vfill_pos != -1:
         tail = cover_text[vfill_pos:]
-        m = re.search(r"\\fontsize\{16bp\}[^}]*\}\\selectfont\\heiti\\bfseries\s+(.*?)(?:\}|\\\\)", tail, re.DOTALL)
-        if m:
+        m = re.search(cover_cfg.date_pattern, tail, re.DOTALL)
+        if m and hasattr(metadata, "report_date"):
             metadata.report_date = _clean(m.group(1))
 
 
-def _extract_revision_records(body: str, metadata: WordExportMetadata) -> str:
+def _extract_revision_records(body: str, metadata: WordExportMetadata, profile) -> str:
     """Extract revision records table and replace with Pandoc-friendly markup."""
-    marker = re.search(r"文档修改记录", body)
+    revision_cfg = profile.preprocessor.revision_table
+    marker = re.search(re.escape(revision_cfg.marker), body)
     if not marker:
         return body
 
@@ -582,11 +567,16 @@ def _extract_revision_records(body: str, metadata: WordExportMetadata) -> str:
     table_abs_end = marker.start() + tabularx_match.end()
 
     # Build simple replacement
-    replacement = "\n\\section*{文档修改记录}\n\n"
+    replacement = f"\n\\section*{{{revision_cfg.section_title}}}\n\n"
     if records:
         cols = "|l|l|p{5cm}|l|l|"
         replacement += f"\\begin{{tabular}}{{{cols}}}\n\\hline\n"
-        replacement += "\\textbf{版本} & \\textbf{日期} & \\textbf{更改摘要} & \\textbf{修改章节} & \\textbf{备注} \\\\\n\\hline\n"
+        headers = (revision_cfg.column_headers + [""] * 5)[:5]
+        replacement += (
+            f"\\textbf{{{headers[0]}}} & \\textbf{{{headers[1]}}} & "
+            f"\\textbf{{{headers[2]}}} & \\textbf{{{headers[3]}}} & "
+            f"\\textbf{{{headers[4]}}} \\\\\n\\hline\n"
+        )
         for rec in records:
             replacement += (
                 f"{rec['version']} & {rec['date']} & {rec['change_summary']} "
