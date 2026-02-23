@@ -57,6 +57,7 @@ class TexStructure:
     lof_entries: list[FloatEntry] = field(default_factory=list)
     lot_entries: list[FloatEntry] = field(default_factory=list)
     labels: dict[str, LabelInfo] = field(default_factory=dict)
+    citation_order: list[str] = field(default_factory=list)
 
     # Internal cursor for sequential heading matching
     _toc_cursor: int = field(default=0, repr=False)
@@ -93,6 +94,14 @@ class TexStructure:
         r"""Resolve a ``\ref{key}`` or ``\cite{key}`` to its display string."""
         label = self.labels.get(key)
         return label.display if label else None
+
+    def resolve_citation_keys(self, keys: list[str]) -> list[str]:
+        """Resolve citation keys in order, preserving unknown keys as-is."""
+        resolved: list[str] = []
+        for key in keys:
+            display = self.resolve_ref(key)
+            resolved.append(display if display else key)
+        return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -298,11 +307,50 @@ def _parse_bibcite_line(line: str) -> LabelInfo | None:
     return LabelInfo(key=m.group(1), display=m.group(2), page=0)
 
 
+def _parse_abx_aux_cite_key(line: str) -> str | None:
+    r"""Parse biblatex aux cite lines and return cite key if present.
+
+    Supports common forms:
+    - ``\abx@aux@cite{<key>}``
+    - ``\abx@aux@cite{<segment>}{<key>}``
+    - ``\abx@aux@segm{...}{...}{<key>}``
+    """
+    m = re.match(r"\\abx@aux@cite\{([^}]+)\}(?:\{([^}]+)\})?", line)
+    if m:
+        # Two-arg form stores key in group 2; one-arg form uses group 1.
+        return m.group(2) or m.group(1)
+    m = re.match(r"\\abx@aux@segm\{[^}]*\}\{[^}]*\}\{([^}]+)\}", line)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _parse_bbl_entries(bbl_path: Path) -> list[str]:
+    r"""Parse ``.bbl`` and return bibliography key order from ``\entry{key}{...}``."""
+    try:
+        content = bbl_path.read_text(encoding="utf-8", errors="replace")
+    except (OSError, IOError) as e:
+        logger.warning("Failed to read bbl file %s: %s", bbl_path, e)
+        return []
+
+    # biblatex .bbl entry form
+    keys = re.findall(r"\\entry\{([^}]+)\}\{", content)
+    if keys:
+        return keys
+
+    # bibtex/natbib numeric styles
+    keys = re.findall(r"\\bibitem(?:\[[^\]]*\])?\{([^}]+)\}", content)
+    if keys:
+        return keys
+
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def parse_aux_file(aux_path: Path) -> TexStructure | None:
+def parse_aux_file(aux_path: Path, bbl_path: Path | None = None) -> TexStructure | None:
     """Parse a ``.aux`` file and return a :class:`TexStructure`.
 
     Returns ``None`` if the file cannot be read.
@@ -314,6 +362,7 @@ def parse_aux_file(aux_path: Path) -> TexStructure | None:
         return None
 
     structure = TexStructure()
+    seen_abx_keys: set[str] = set()
 
     for line in content.splitlines():
         line = line.strip()
@@ -355,11 +404,37 @@ def parse_aux_file(aux_path: Path) -> TexStructure | None:
                 structure.labels[info.key] = info
             continue
 
+        # biblatex citation tracking (for later .bbl mapping)
+        if line.startswith("\\abx@aux@cite") or line.startswith("\\abx@aux@segm"):
+            key = _parse_abx_aux_cite_key(line)
+            if key and key not in seen_abx_keys:
+                seen_abx_keys.add(key)
+                structure.citation_order.append(key)
+            continue
+
+    # If we have biblatex cite keys, prefer .bbl entry order for final numbering.
+    if bbl_path and bbl_path.exists():
+        bbl_order = _parse_bbl_entries(bbl_path)
+        if bbl_order:
+            for i, key in enumerate(bbl_order, start=1):
+                if key not in structure.labels:
+                    structure.labels[key] = LabelInfo(key=key, display=str(i), page=0)
+        else:
+            # Fallback: use aux citation encounter order when .bbl parsing yields no entries.
+            for i, key in enumerate(structure.citation_order, start=1):
+                if key not in structure.labels:
+                    structure.labels[key] = LabelInfo(key=key, display=str(i), page=0)
+    elif structure.citation_order:
+        for i, key in enumerate(structure.citation_order, start=1):
+            if key not in structure.labels:
+                structure.labels[key] = LabelInfo(key=key, display=str(i), page=0)
+
     logger.info(
-        "Parsed .aux: %d toc, %d figures, %d tables, %d labels",
+        "Parsed .aux: %d toc, %d figures, %d tables, %d labels, %d cites",
         len(structure.toc_entries),
         len(structure.lof_entries),
         len(structure.lot_entries),
         len(structure.labels),
+        len(structure.citation_order),
     )
     return structure

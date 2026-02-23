@@ -27,8 +27,13 @@ class LabelsConfig:
     """UI labels for abstract, TOC, captions, etc."""
     abstract: str = "摘要"
     toc: str = "目  录"
+    list_of_figures: str = "图形列表"
+    list_of_tables: str = "表格列表"
     figure_prefix: str = "图"
     table_prefix: str = "表"
+    keywords_zh_prefix: str = "关键词："
+    keywords_en_prefix: str = "Keywords: "
+    advisor_en_prefix: str = "Supervisor: "
     references: str = "参考文献"
     toc_update_hint: str = "请右键点击此处，选择\u201c更新域\u201d以生成目录"
 
@@ -198,6 +203,104 @@ class FrontmatterConfig:
     auto_toc: AutoTocConfig | None = None
 
 
+@dataclass
+class MetadataFieldRuleConfig:
+    """Map one metadata attr to one LaTeX preamble command."""
+    attr: str = ""
+    command: str = ""
+    strip_prefix_regex: str = ""
+
+
+@dataclass
+class CoverApprovalFieldConfig:
+    """How to parse one approval row in a cover table."""
+    label: str = ""
+    name_attr: str = ""
+    date_attr: str = ""
+
+
+@dataclass
+class CoverParserConfig:
+    """Rules for cover extraction/parsing in the preprocessor."""
+    enabled: bool = True
+    block_start: str = r"\\begingroup"
+    block_end: str = r"\\endgroup"
+    detection_markers: list[str] = dc_field(default_factory=lambda: ["编写", "批准"])
+    field_patterns: dict[str, str] = dc_field(default_factory=lambda: {
+        "doc_number": r"文件编号\s*&\s*(.*?)\\\\",
+        "phase_mark": r"阶段标志\s*&\s*(.*?)\\\\",
+        "classification": r"密\s*\\quad\s*级\s*&\s*(.*?)\\\\",
+        "page_count": r"页\s*\\quad\s*数\s*&\s*(.*?)\\\\",
+        "title": r"名\s*\\quad\s*称\s*&\s*(.*?)\\\\",
+    })
+    approval_fields: list[CoverApprovalFieldConfig] = dc_field(default_factory=lambda: [
+        CoverApprovalFieldConfig(label="编写", name_attr="writer", date_attr="write_date"),
+        CoverApprovalFieldConfig(label="校对", name_attr="proofreader", date_attr="proofread_date"),
+        CoverApprovalFieldConfig(label="审核", name_attr="reviewer", date_attr="review_date"),
+        CoverApprovalFieldConfig(label="标审", name_attr="standard_reviewer", date_attr="standard_review_date"),
+        CoverApprovalFieldConfig(label="批准", name_attr="approver", date_attr="approve_date"),
+    ])
+    institute_pattern: str = (
+        r"\\fontsize\{18bp\}[^}]*\}\\selectfont\\heiti\\bfseries\s+(.*?)(?:\}|\\\\)"
+    )
+    date_pattern: str = (
+        r"\\fontsize\{16bp\}[^}]*\}\\selectfont\\heiti\\bfseries\s+(.*?)(?:\}|\\\\)"
+    )
+
+
+@dataclass
+class RevisionTableParserConfig:
+    """Rules for revision-table extraction/replacement in the preprocessor."""
+    marker: str = "文档修改记录"
+    section_title: str = "文档修改记录"
+    column_headers: list[str] = dc_field(default_factory=lambda: [
+        "版本", "日期", "更改摘要", "修改章节", "备注"
+    ])
+
+
+@dataclass
+class PreprocessorConfig:
+    """Template-configurable preprocessing rules."""
+    normalize_documentclass_map: dict[str, str] = dc_field(default_factory=lambda: {
+        "Style/ucasthesis": "ctexrep",
+        "ucasthesis": "ctexrep",
+    })
+    preamble_metadata_fields: list[MetadataFieldRuleConfig] = dc_field(default_factory=lambda: [
+        MetadataFieldRuleConfig(attr="advisor", command="advisor"),
+        MetadataFieldRuleConfig(attr="degree", command="degree"),
+        MetadataFieldRuleConfig(attr="degreetype", command="degreetype"),
+        MetadataFieldRuleConfig(attr="major", command="major"),
+        MetadataFieldRuleConfig(attr="institute", command="institute"),
+        MetadataFieldRuleConfig(attr="date", command="date"),
+        MetadataFieldRuleConfig(attr="title_en", command="TITLE"),
+        MetadataFieldRuleConfig(attr="author_en", command="AUTHOR"),
+        MetadataFieldRuleConfig(
+            attr="advisor_en",
+            command="ADVISOR",
+            strip_prefix_regex=r"^\s*supervisor\s*[:：]\s*",
+        ),
+        MetadataFieldRuleConfig(attr="degree_en", command="DEGREE"),
+        MetadataFieldRuleConfig(attr="degreetype_en", command="DEGREETYPE"),
+        MetadataFieldRuleConfig(attr="major_en", command="MAJOR"),
+        MetadataFieldRuleConfig(attr="institute_en", command="INSTITUTE"),
+        MetadataFieldRuleConfig(attr="date_en", command="DATE"),
+    ])
+    remove_preamble_commands_with_arg: list[str] = dc_field(default_factory=lambda: [
+        "confidential", "schoollogo", "advisor", "degree", "degreetype",
+        "major", "institute",
+        "TITLE", "AUTHOR", "ADVISOR", "DEGREE", "DEGREETYPE", "MAJOR",
+        "INSTITUTE", "DATE",
+    ])
+    strip_body_commands: list[str] = dc_field(default_factory=lambda: [
+        "frontmatter", "mainmatter", "backmatter",
+        "maketitle", "MAKETITLE", "makedeclaration",
+        "listoffigures", "listoftables", "tableofcontents",
+    ])
+    title_implies_cover: bool = False
+    cover: CoverParserConfig = dc_field(default_factory=CoverParserConfig)
+    revision_table: RevisionTableParserConfig = dc_field(default_factory=RevisionTableParserConfig)
+
+
 # ---------------------------------------------------------------------------
 # DocxProfile — the main configuration object
 # ---------------------------------------------------------------------------
@@ -216,6 +319,7 @@ class DocxProfile:
     styles: StylesConfig = dc_field(default_factory=StylesConfig)
     page_headers: PageHeadersConfig = dc_field(default_factory=PageHeadersConfig)
     frontmatter: FrontmatterConfig = dc_field(default_factory=FrontmatterConfig)
+    preprocessor: PreprocessorConfig = dc_field(default_factory=PreprocessorConfig)
     reference_docx: str | None = None
     doc_class_type: str = "report"
     template_dir: Path | None = None
@@ -280,8 +384,13 @@ def _build_labels(data: dict) -> LabelsConfig:
     return LabelsConfig(
         abstract=data.get("abstract", defaults.abstract),
         toc=data.get("toc", defaults.toc),
+        list_of_figures=data.get("list_of_figures", defaults.list_of_figures),
+        list_of_tables=data.get("list_of_tables", defaults.list_of_tables),
         figure_prefix=data.get("figure_prefix", defaults.figure_prefix),
         table_prefix=data.get("table_prefix", defaults.table_prefix),
+        keywords_zh_prefix=data.get("keywords_zh_prefix", defaults.keywords_zh_prefix),
+        keywords_en_prefix=data.get("keywords_en_prefix", defaults.keywords_en_prefix),
+        advisor_en_prefix=data.get("advisor_en_prefix", defaults.advisor_en_prefix),
         references=data.get("references", defaults.references),
         toc_update_hint=data.get("toc_update_hint", defaults.toc_update_hint),
     )
@@ -417,6 +526,74 @@ def _build_frontmatter(data: dict) -> FrontmatterConfig:
     )
 
 
+def _build_metadata_field_rule(data: dict) -> MetadataFieldRuleConfig:
+    return MetadataFieldRuleConfig(
+        attr=data.get("attr", ""),
+        command=data.get("command", ""),
+        strip_prefix_regex=data.get("strip_prefix_regex", ""),
+    )
+
+
+def _build_cover_approval_field(data: dict) -> CoverApprovalFieldConfig:
+    return CoverApprovalFieldConfig(
+        label=data.get("label", ""),
+        name_attr=data.get("name_attr", ""),
+        date_attr=data.get("date_attr", ""),
+    )
+
+
+def _build_cover_parser(data: dict) -> CoverParserConfig:
+    defaults = CoverParserConfig()
+    approval_data = data.get("approval_fields", None)
+    if approval_data is None:
+        approval_fields = defaults.approval_fields
+    else:
+        approval_fields = [_build_cover_approval_field(item) for item in approval_data]
+    return CoverParserConfig(
+        enabled=data.get("enabled", defaults.enabled),
+        block_start=data.get("block_start", defaults.block_start),
+        block_end=data.get("block_end", defaults.block_end),
+        detection_markers=data.get("detection_markers", defaults.detection_markers),
+        field_patterns=data.get("field_patterns", defaults.field_patterns),
+        approval_fields=approval_fields,
+        institute_pattern=data.get("institute_pattern", defaults.institute_pattern),
+        date_pattern=data.get("date_pattern", defaults.date_pattern),
+    )
+
+
+def _build_revision_table_parser(data: dict) -> RevisionTableParserConfig:
+    defaults = RevisionTableParserConfig()
+    return RevisionTableParserConfig(
+        marker=data.get("marker", defaults.marker),
+        section_title=data.get("section_title", defaults.section_title),
+        column_headers=data.get("column_headers", defaults.column_headers),
+    )
+
+
+def _build_preprocessor(data: dict) -> PreprocessorConfig:
+    defaults = PreprocessorConfig()
+    metadata_fields_data = data.get("preamble_metadata_fields", None)
+    if metadata_fields_data is None:
+        metadata_fields = defaults.preamble_metadata_fields
+    else:
+        metadata_fields = [_build_metadata_field_rule(item) for item in metadata_fields_data]
+    return PreprocessorConfig(
+        normalize_documentclass_map=data.get(
+            "normalize_documentclass_map",
+            defaults.normalize_documentclass_map,
+        ),
+        preamble_metadata_fields=metadata_fields,
+        remove_preamble_commands_with_arg=data.get(
+            "remove_preamble_commands_with_arg",
+            defaults.remove_preamble_commands_with_arg,
+        ),
+        strip_body_commands=data.get("strip_body_commands", defaults.strip_body_commands),
+        title_implies_cover=data.get("title_implies_cover", defaults.title_implies_cover),
+        cover=_build_cover_parser(data.get("cover", {})),
+        revision_table=_build_revision_table_parser(data.get("revision_table", {})),
+    )
+
+
 def _build_profile_from_dict(data: dict, doc_class_type: str = "report",
                               template_dir: Path | None = None) -> DocxProfile:
     """Build a DocxProfile from a raw dict (the ``docx_profile`` JSON value)."""
@@ -428,6 +605,7 @@ def _build_profile_from_dict(data: dict, doc_class_type: str = "report",
         styles=_build_styles(data.get("styles", {})),
         page_headers=_build_page_headers(data.get("page_headers", {})),
         frontmatter=_build_frontmatter(data.get("frontmatter", {})),
+        preprocessor=_build_preprocessor(data.get("preprocessor", {})),
         reference_docx=data.get("reference_docx"),
         doc_class_type=doc_class_type,
         template_dir=template_dir,

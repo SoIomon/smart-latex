@@ -168,6 +168,8 @@ class LatexToDocxConverter:
         self._figure_count = 0
         self._table_count = 0
         self._equation_count = 0
+        self._footnote_count = 0
+        self._footnotes: list[tuple[int, str]] = []
         # Flag: just exited a float → next paragraph gets extra space_before
         self._after_float = False
 
@@ -477,19 +479,51 @@ class LatexToDocxConverter:
 
         self._finish_paragraph()
 
-        # Always use a Normal-styled paragraph with direct formatting.
-        # Heading N styles cause phantom dots/bullets because the user's
-        # Word application (Normal.dotm) may auto-apply outline numbering.
-        # For TOC-visible headings we add outlineLvl so "TOC \o" still
-        # picks them up.
-        heading_para = self._add_heading_no_toc(display_title, level)
-        if not exclude_from_toc:
-            pPr = heading_para._element.get_or_add_pPr()
-            outline = OxmlElement("w:outlineLvl")
-            outline.set(qn("w:val"), str(level - 1))
-            pPr.append(outline)
+        # Numbered body headings use built-in Heading styles so Word can
+        # recognize "标题 1/2/3" in the style gallery and navigation.
+        # Front-matter/starred headings remain custom to avoid TOC pollution.
+        if exclude_from_toc:
+            self._add_heading_no_toc(display_title, level)
+        else:
+            self._add_heading_builtin(display_title, level)
 
         self._finish_paragraph()
+
+    def _add_heading_builtin(self, title: str, level: int):
+        """Add a built-in Heading paragraph (Heading 1..4)."""
+        style_name = f"Heading {min(max(level, 1), 4)}"
+        try:
+            para = self.doc.add_paragraph(style=style_name)
+        except KeyError:
+            para = self.doc.add_paragraph(style="Heading 1")
+
+        # Defensive cleanup: remove direct numPr to avoid phantom bullets.
+        pPr = para._element.get_or_add_pPr()
+        for numPr in pPr.findall(qn("w:numPr")):
+            pPr.remove(numPr)
+
+        run = para.add_run(title)
+        hs = self.profile.get_heading_style(level)
+        if hs:
+            run.font.size = Pt(hs.font_size_pt)
+            run.bold = hs.bold
+        else:
+            run.font.size = Pt(15)
+            run.bold = True
+        run.font.color.rgb = RGBColor(0, 0, 0)
+
+        if self.profile.fonts.heading_east_asian:
+            rPr = run._element.get_or_add_rPr()
+            rFonts = rPr.find(qn("w:rFonts"))
+            if rFonts is None:
+                rFonts = OxmlElement("w:rFonts")
+                rPr.insert(0, rFonts)
+            rFonts.set(qn("w:eastAsia"), self.profile.fonts.heading_east_asian)
+
+        if level == 1:
+            para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+        return para
 
     def _ensure_latex_heading_styles(self):
         """Create custom ``LaTeX Heading N`` styles (1-4) if they don't exist.
@@ -559,8 +593,36 @@ class LatexToDocxConverter:
         return para
 
     def _tokens_to_text(self, tokens: list[Token]) -> str:
-        """Convert a list of tokens to plain text."""
-        parts = []
+        """Convert tokens to readable text with basic ref/cite resolution."""
+        from .math_handler import _latex_math_to_text
+
+        def _skip_ws(idx: int) -> int:
+            while idx < len(tokens) and tokens[idx].type == TokenType.WHITESPACE:
+                idx += 1
+            return idx
+
+        def _read_group(idx: int, open_t: TokenType, close_t: TokenType) -> tuple[list[Token] | None, int]:
+            j = _skip_ws(idx)
+            if j >= len(tokens) or tokens[j].type != open_t:
+                return None, idx
+            j += 1
+            depth = 1
+            inner: list[Token] = []
+            while j < len(tokens) and depth > 0:
+                t = tokens[j]
+                if t.type == open_t:
+                    depth += 1
+                    inner.append(t)
+                elif t.type == close_t:
+                    depth -= 1
+                    if depth > 0:
+                        inner.append(t)
+                else:
+                    inner.append(t)
+                j += 1
+            return inner, j
+
+        parts: list[str] = []
         i = 0
         while i < len(tokens):
             tok = tokens[i]
@@ -568,39 +630,75 @@ class LatexToDocxConverter:
                 parts.append(tok.value)
             elif tok.type == TokenType.WHITESPACE:
                 parts.append(" ")
+            elif tok.type == TokenType.MATH_INLINE:
+                parts.append(_latex_math_to_text(tok.extra.get("content", tok.value)))
+            elif tok.type == TokenType.MATH_DISPLAY:
+                parts.append(_latex_math_to_text(tok.extra.get("content", tok.value)))
             elif tok.type == TokenType.COMMAND:
                 name = tok.extra.get("name", "")
-                if name in ("textbf", "textit", "emph", "underline", "text"):
-                    # Consume the brace group
-                    j = i + 1
-                    if j < len(tokens) and tokens[j].type == TokenType.BRACE_OPEN:
-                        depth = 1
-                        j += 1
-                        inner = []
-                        while j < len(tokens) and depth > 0:
-                            if tokens[j].type == TokenType.BRACE_OPEN:
-                                depth += 1
-                            elif tokens[j].type == TokenType.BRACE_CLOSE:
-                                depth -= 1
-                                if depth == 0:
-                                    j += 1
-                                    break
-                            inner.append(tokens[j])
-                            j += 1
+
+                if name in _SYMBOL_MAP:
+                    parts.append(_SYMBOL_MAP[name])
+                    i += 1
+                    continue
+
+                if name in ("textbf", "textit", "emph", "underline", "text", "textrm", "texttt"):
+                    inner, j = _read_group(i + 1, TokenType.BRACE_OPEN, TokenType.BRACE_CLOSE)
+                    if inner is not None:
                         parts.append(self._tokens_to_text(inner))
                         i = j
                         continue
-                elif name in ("heiti", "songti", "kaiti", "fangsong"):
-                    pass  # skip font commands
-                elif name in ("quad", "qquad", "enspace", "thinspace"):
+
+                if name in ("ref", "autoref", "cref", "Cref", "pageref", "eqref"):
+                    inner, j = _read_group(i + 1, TokenType.BRACE_OPEN, TokenType.BRACE_CLOSE)
+                    if inner is not None:
+                        key = self._tokens_to_text(inner).strip()
+                        if name == "pageref" and self.tex_structure:
+                            label = self.tex_structure.labels.get(key)
+                            display = str(label.page) if label else key
+                        elif self.tex_structure:
+                            display = self.tex_structure.resolve_ref(key) or key
+                        else:
+                            display = key
+                        if name == "eqref":
+                            parts.append(f"({display})")
+                        else:
+                            parts.append(display)
+                        i = j
+                        continue
+
+                if name in ("cite", "citep", "citet", "citealt", "citealp", "citenum", "parencite", "textcite"):
+                    j = i + 1
+                    while True:
+                        _, next_j = _read_group(j, TokenType.BRACKET_OPEN, TokenType.BRACKET_CLOSE)
+                        if next_j == j:
+                            break
+                        j = next_j
+                    inner, j2 = _read_group(j, TokenType.BRACE_OPEN, TokenType.BRACE_CLOSE)
+                    if inner is not None:
+                        keys_str = self._tokens_to_text(inner).strip()
+                        keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+                        if self.tex_structure:
+                            resolved = self.tex_structure.resolve_citation_keys(keys)
+                        else:
+                            resolved = keys
+                        joined = ", ".join(resolved)
+                        if name in ("citenum", "citealt", "citealp"):
+                            parts.append(joined)
+                        else:
+                            parts.append(f"[{joined}]")
+                        i = j2
+                        continue
+
+                if name in ("heiti", "songti", "kaiti", "fangsong"):
+                    i += 1
+                    continue
+                if name in ("quad", "qquad", "enspace", "thinspace"):
                     parts.append("  " if name == "qquad" else " ")
-                else:
-                    pass  # skip unknown commands in title context
-            elif tok.type == TokenType.BRACE_OPEN or tok.type == TokenType.BRACE_CLOSE:
-                pass  # skip braces
-            elif tok.type == TokenType.MATH_INLINE:
-                parts.append(tok.extra.get("content", tok.value))
+                    i += 1
+                    continue
             i += 1
+
         return "".join(parts).strip()
 
     # ── Main conversion ──────────────────────────────────────────────
@@ -624,6 +722,11 @@ class LatexToDocxConverter:
         enable_update_fields(self.doc)
 
         return self.doc
+
+    @property
+    def footnotes(self) -> list[tuple[int, str]]:
+        """Collected footnotes as ``(id, text)`` pairs."""
+        return list(self._footnotes)
 
     def _fix_body_sectpr_position(self):
         """Move the body-level <w:sectPr> to the very end of the body.
@@ -951,6 +1054,14 @@ class LatexToDocxConverter:
             else:
                 self._add_run(f"[{ref_key}]")
             return
+        if name == "eqref":
+            ref_key = self._read_brace_group()
+            if self.tex_structure:
+                resolved = self.tex_structure.resolve_ref(ref_key)
+                self._add_run(f"({resolved})" if resolved else f"({ref_key})")
+            else:
+                self._add_run(f"({ref_key})")
+            return
         if name == "pageref":
             ref_key = self._read_brace_group()
             if self.tex_structure:
@@ -959,21 +1070,48 @@ class LatexToDocxConverter:
             else:
                 self._add_run(f"[{ref_key}]")
             return
-        if name == "cite":
-            self._read_optional_arg()  # optional arg like [p.~3]
+        if name in ("cite", "citep", "citet", "citealt", "citealp", "citenum", "parencite", "textcite"):
+            # Consume one or more optional args (e.g. biblatex prenote/postnote).
+            while self._read_optional_arg() is not None:
+                pass
             cite_keys_str = self._read_brace_group()
             if self.tex_structure:
-                keys = [k.strip() for k in cite_keys_str.split(",")]
-                resolved = []
-                for k in keys:
-                    r = self.tex_structure.resolve_ref(k)
-                    resolved.append(r if r else k)
-                self._add_run(f"[{', '.join(resolved)}]")
+                keys = [k.strip() for k in cite_keys_str.split(",") if k.strip()]
+                resolved = self.tex_structure.resolve_citation_keys(keys)
+                joined = ", ".join(resolved)
+                if name in ("citenum", "citealt", "citealp"):
+                    self._add_run(joined)
+                else:
+                    self._add_run(f"[{joined}]")
             else:
-                self._add_run(f"[{cite_keys_str}]")
+                if name in ("citenum", "citealt", "citealp"):
+                    self._add_run(cite_keys_str)
+                else:
+                    self._add_run(f"[{cite_keys_str}]")
+            return
+        if name in ("autoref", "cref", "Cref"):
+            ref_key = self._read_brace_group()
+            if self.tex_structure:
+                resolved = self.tex_structure.resolve_ref(ref_key)
+                self._add_run(resolved if resolved else ref_key)
+            else:
+                self._add_run(ref_key)
             return
         if name == "bibliography":
             self._read_brace_group()
+            return
+
+        # Template keyword commands
+        if name in ("keywords", "KEYWORDS"):
+            kw = self._read_brace_group().strip()
+            if name == "keywords":
+                prefix = self.profile.labels.keywords_zh_prefix
+            else:
+                prefix = self.profile.labels.keywords_en_prefix
+            bold_fmt = self.format_stack[-1].merge(bold=True)
+            self._add_run(prefix, bold_fmt)
+            if kw:
+                self._add_run(kw)
             return
 
         # Footnote
@@ -1280,13 +1418,24 @@ class LatexToDocxConverter:
     # ── Footnote ─────────────────────────────────────────────────────
 
     def _handle_footnote(self):
-        note_text = self._read_brace_group()
+        note_tokens = self._read_brace_group_tokens()
+        note_text = self._tokens_to_text(note_tokens).strip()
+        if not note_text:
+            return
+
+        self._footnote_count += 1
+        footnote_id = self._footnote_count
+        self._footnotes.append((footnote_id, note_text))
+
         para = self._ensure_paragraph()
-        # Simplified: add as superscript note marker + text in parentheses
-        # A proper implementation would use Word's footnote API
-        run = para.add_run(f"({note_text})")
-        run.font.size = Pt(9)
-        run.font.superscript = True
+        run = para.add_run()
+        rPr = run._element.get_or_add_rPr()
+        rStyle = OxmlElement("w:rStyle")
+        rStyle.set(qn("w:val"), "FootnoteReference")
+        rPr.append(rStyle)
+        footnote_ref = OxmlElement("w:footnoteReference")
+        footnote_ref.set(qn("w:id"), str(footnote_id))
+        run._element.append(footnote_ref)
 
     # ── Image handling ───────────────────────────────────────────────
 
@@ -1584,10 +1733,10 @@ class LatexToDocxConverter:
         field is inserted that the user can update after opening the file.
         """
         if kind == "figure":
-            heading_text = "图形列表"
+            heading_text = self.profile.labels.list_of_figures
             label = self.profile.labels.figure_prefix
         else:
-            heading_text = "表格列表"
+            heading_text = self.profile.labels.list_of_tables
             label = self.profile.labels.table_prefix
 
         self._finish_paragraph()
