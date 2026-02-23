@@ -1,144 +1,222 @@
 # Smart-LaTeX
 
+AI-powered LaTeX document generation system — upload documents, auto-typeset, generate professional PDFs in one click.
+
 AI 驱动的 LaTeX 文档生成系统 — 上传文档，智能排版，一键生成专业 PDF。
 
-## 功能特性
+## Features / 功能特性
 
-- **智能文档转换**：上传 Word/PDF/Markdown，AI 自动分析内容并生成专业 LaTeX 文档
-- **内置模板**：学术论文、工作报告、招标方案、通信研究报告等多种模板
-- **在线编辑器**：LaTeX 语法高亮、自动补全，实时预览
-- **一键编译 PDF**：集成 XeLaTeX 编译，编译错误 AI 自动修复
-- **Word 导出**：通过 Pandoc 将 LaTeX 转为 Word 格式
-- **自定义模板**：上传 .docx 样式文件，AI 自动提取格式生成 .tex.j2 模板
+- **Smart Document Conversion** — Upload Word/PDF/Markdown, AI analyzes content and generates professional LaTeX documents
+- **Built-in Templates** — Academic papers, theses (UCAS), research reports, bid proposals, and more
+- **Online Editor** — CodeMirror 6 with LaTeX syntax highlighting, real-time PDF preview
+- **One-click PDF Compilation** — Integrated XeLaTeX + latexmk, with AI auto-fix for compilation errors
+- **Word Export** — Direct LaTeX-to-DOCX conversion with high-fidelity formatting (Pandoc fallback available)
+- **Custom Templates** — Upload a .docx reference, AI extracts styles and generates a .tex.j2 template
 
-## 系统要求
+## How It Works / 工作原理
 
-| 依赖 | 版本 | 说明 |
-|------|------|------|
-| Python | 3.10+ | 后端运行时 |
-| Node.js | 18+ | 前端构建 |
-| LaTeX | XeTeX + latexmk | PDF 编译 |
-| Pandoc | 可选 | Word 导出 |
+```
+Upload Documents ──► AI Analysis (parallel) ──► Outline Planning ──► Chapter Generation (parallel)
+                         batch=10                                         batch=8
+                                                                            │
+                                                              XeLaTeX validation per chapter
+                                                              AI auto-fix on error
+                                                                            ▼
+                                                                     Final PDF / Word
+```
 
-### LaTeX 安装
+## Requirements / 系统要求
 
-- **macOS**: `brew install --cask basictex`（安装后运行 install.sh 自动补全宏包）
-- **Windows**: [MiKTeX](https://miktex.org/)（推荐，自动安装宏包）或 [TeX Live](https://tug.org/texlive/)
-- **Linux**: `sudo apt install texlive-xetex texlive-lang-chinese latexmk`
+| Dependency | Version | Required | Notes |
+|------------|---------|----------|-------|
+| Python | 3.10+ | Yes | Backend runtime |
+| Node.js | 18+ | Yes | Frontend build |
+| XeTeX + latexmk | Any | Yes | PDF compilation with CJK support |
+| Pandoc | Any | No | Fallback for Word export |
 
-### API 密钥
+### LLM API
 
-需要豆包大模型 API Key（[火山引擎控制台](https://console.volcengine.com/ark)）。
+Smart-LaTeX uses the **OpenAI-compatible API** protocol. You can use any provider:
 
-## 快速安装
+| Provider | BASE_URL | Notes |
+|----------|----------|-------|
+| Volcengine (火山引擎/豆包) | `https://ark.cn-beijing.volces.com/api/v3` | Default |
+| OpenAI | `https://api.openai.com/v1` | GPT-4o, etc. |
+| DeepSeek | `https://api.deepseek.com/v1` | DeepSeek-V3, etc. |
+| Local (Ollama) | `http://localhost:11434/v1` | Self-hosted models |
+| Any OpenAI-compatible | `https://your-proxy/v1` | Custom proxy/gateway |
 
-### macOS / Linux
+## Quick Start / 快速开始
+
+### 1. Install / 安装
+
+**macOS / Linux:**
 
 ```bash
-git clone <repo-url> smart-latex
+git clone https://github.com/your-username/smart-latex.git
 cd smart-latex
 ./install.sh
 ```
 
-### Windows (PowerShell)
+**Windows (PowerShell):**
 
 ```powershell
-git clone <repo-url> smart-latex
+git clone https://github.com/your-username/smart-latex.git
 cd smart-latex
 .\install.ps1
 ```
 
-安装完成后，编辑 `backend/.env` 填入 API 密钥。
+The install script will:
+- Check system dependencies (Python, Node.js, LaTeX)
+- Create Python venv and install pip packages
+- Install npm packages and build the frontend
+- Auto-install common LaTeX packages via `tlmgr`
+- Create `backend/.env` from the example template
 
-## 启动服务
+### 2. Configure / 配置
 
-### macOS / Linux
-
-```bash
-./start.sh
-```
-
-### Windows
-
-```powershell
-.\start.ps1
-```
-
-启动后访问 http://localhost:8000。
-
-## 开发模式
-
-前后端热更新，适合开发调试。
-
-### macOS / Linux
+Edit `backend/.env` with your API credentials:
 
 ```bash
-./scripts/dev.sh
+# Required — your LLM API key
+DOUBAO_API_KEY=sk-xxxxxxxxxxxxxxxx
+
+# Required — model name or endpoint ID
+DOUBAO_MODEL=gpt-4o
+
+# Optional — change if not using Volcengine (default)
+DOUBAO_BASE_URL=https://api.openai.com/v1
 ```
 
-### Windows
+<details>
+<summary>Full configuration reference / 完整配置说明</summary>
 
-```powershell
-.\scripts\dev.ps1
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DOUBAO_API_KEY` | LLM API key | *(required)* |
+| `DOUBAO_BASE_URL` | OpenAI-compatible API base URL | `https://ark.cn-beijing.volces.com/api/v3` |
+| `DOUBAO_MODEL` | Model name or endpoint ID | *(required)* |
+| `DATABASE_URL` | SQLite connection string | `sqlite+aiosqlite:///./storage/smart_latex.db` |
+| `STORAGE_DIR` | Runtime file storage directory | `./storage` |
+| `LATEX_CMD` | Path to `latexmk` | `latexmk` |
+| `CORS_ORIGINS` | Allowed CORS origins (JSON array) | `["http://localhost:5173","http://localhost:8000"]` |
+
+</details>
+
+### 3. Start / 启动
+
+**Production mode** (serves frontend build via backend):
+
+```bash
+./start.sh          # macOS / Linux
+.\start.ps1         # Windows
 ```
 
-- 前端: http://localhost:5173
-- 后端: http://localhost:8000
-- API 文档: http://localhost:8000/docs
+Open http://localhost:8000 in your browser.
 
-## 配置说明
+**Development mode** (hot reload for both frontend and backend):
 
-配置文件位于 `backend/.env`，基于 `backend/.env.example` 模板：
+```bash
+./scripts/dev.sh    # macOS / Linux
+.\scripts\dev.ps1   # Windows
+```
 
-| 配置项 | 说明 | 示例 |
-|--------|------|------|
-| `DOUBAO_API_KEY` | 豆包 API 密钥 | `your-api-key` |
-| `DOUBAO_BASE_URL` | API 地址 | `https://ark.cn-beijing.volces.com/api/v3` |
-| `DOUBAO_MODEL` | 模型端点 ID | `ep-xxxx` |
-| `DATABASE_URL` | 数据库连接 | `sqlite+aiosqlite:///./storage/smart_latex.db` |
-| `STORAGE_DIR` | 文件存储目录 | `./storage` |
-| `LATEX_CMD` | latexmk 路径 | `latexmk` 或 `/Library/TeX/texbin/latexmk` |
-| `CORS_ORIGINS` | CORS 允许来源 | `["http://localhost:5173","http://localhost:8000"]` |
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8000
+- API docs: http://localhost:8000/docs
 
-## 项目结构
+## LaTeX Installation / LaTeX 安装
+
+<details>
+<summary>macOS</summary>
+
+```bash
+brew install --cask basictex
+```
+
+After installation, run `./install.sh` — it will auto-install required LaTeX packages via `tlmgr`.
+
+Alternatively, install the full TeX Live distribution (larger but complete):
+```bash
+brew install --cask mactex
+```
+
+</details>
+
+<details>
+<summary>Linux (Ubuntu/Debian)</summary>
+
+```bash
+sudo apt install texlive-xetex texlive-lang-chinese texlive-latex-extra latexmk
+```
+
+</details>
+
+<details>
+<summary>Windows</summary>
+
+Install [MiKTeX](https://miktex.org/) (recommended, auto-installs packages) or [TeX Live](https://tug.org/texlive/).
+
+</details>
+
+## Project Structure / 项目结构
 
 ```
 smart-latex/
-├── backend/                # FastAPI 后端
+├── backend/                  # FastAPI backend
 │   ├── app/
-│   │   ├── api/            # API 路由
-│   │   ├── core/           # 核心逻辑
-│   │   │   ├── compiler/   # LaTeX 编译器
-│   │   │   ├── llm/        # LLM 集成 & prompts
-│   │   │   ├── parsers/    # 文档解析器
-│   │   │   └── templates/  # Jinja2 LaTeX 模板
-│   │   ├── models/         # 数据库模型
-│   │   └── services/       # 业务逻辑
-│   ├── tests/              # 后端测试
-│   ├── storage/            # 运行时文件存储
+│   │   ├── api/v1/           # REST API routes
+│   │   ├── core/
+│   │   │   ├── compiler/     # LaTeX compilation & LaTeX→DOCX converter
+│   │   │   ├── llm/          # LLM client, prompt templates, tool calling
+│   │   │   ├── parsers/      # Document parsers (DOCX, PDF, MD, TXT)
+│   │   │   └── templates/    # Jinja2 LaTeX templates (builtin + custom)
+│   │   ├── models/           # SQLAlchemy async models
+│   │   └── services/         # Business logic layer
+│   ├── tests/
 │   └── requirements.txt
-├── frontend/               # React 前端
-│   ├── src/
-│   │   ├── api/            # API 客户端
-│   │   ├── components/     # React 组件
-│   │   ├── pages/          # 页面
-│   │   ├── stores/         # 状态管理
-│   │   └── utils/          # 工具函数
-│   └── package.json
-├── scripts/                # 开发脚本
-│   ├── dev.sh              # Mac/Linux 开发模式
-│   └── dev.ps1             # Windows 开发模式
-├── test_doc/               # 测试文档
-├── install.sh              # Mac/Linux 安装脚本
-├── install.ps1             # Windows 安装脚本
-├── start.sh                # Mac/Linux 启动脚本
-└── start.ps1               # Windows 启动脚本
+├── frontend/                 # React + TypeScript frontend
+│   └── src/
+│       ├── components/       # Editor (CodeMirror 6), ChatPanel, DocumentPanel
+│       ├── pages/            # HomePage, Workspace, TemplateGallery, Settings
+│       ├── stores/           # Zustand state management
+│       └── api/              # Axios API client with SSE streaming
+├── scripts/                  # Dev/build scripts
+├── install.sh / install.ps1  # One-click install
+└── start.sh / start.ps1      # One-click start
 ```
 
-## 技术栈
+## Tech Stack / 技术栈
 
-- **前端**: React 19 + TypeScript + Vite + Ant Design
-- **后端**: FastAPI + SQLAlchemy + Jinja2
-- **AI**: 豆包大模型（火山引擎 API）
-- **编译**: XeLaTeX + latexmk
-- **导出**: Pandoc (LaTeX → Word)
+| Layer | Technologies |
+|-------|-------------|
+| Frontend | React 19, TypeScript, Vite, Ant Design, CodeMirror 6, Zustand |
+| Backend | FastAPI, SQLAlchemy (async), Jinja2, python-docx, PyMuPDF |
+| AI | OpenAI-compatible API (GPT, DeepSeek, Doubao, Ollama, etc.) |
+| Compilation | XeLaTeX + latexmk |
+| Export | Direct LaTeX→DOCX converter (python-docx), Pandoc fallback |
+| Database | SQLite (via aiosqlite) |
+| Streaming | SSE (Server-Sent Events) for generation & compilation progress |
+
+## Built-in Templates / 内置模板
+
+| Template | Description |
+|----------|-------------|
+| `academic_paper` | General academic paper (ctexart) |
+| `ucas_thesis` | UCAS dissertation — Chinese Academy of Sciences (ucasthesis) |
+| `comm_research_report` | Telecom research report with cover page & approval table |
+| `bid_proposal` | Bidding proposal / technical document |
+| `work_report` | General work report |
+
+## Contributing / 贡献
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feat/my-feature`)
+3. Commit your changes
+4. Push to your fork and submit a Pull Request
+
+## License / 许可证
+
+[MIT](LICENSE)
