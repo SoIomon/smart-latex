@@ -1,8 +1,10 @@
 import asyncio
 import logging
 import os
+import platform
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -250,6 +252,64 @@ def _fix_truncated_latex(content: str) -> str:
     return content
 
 
+def _build_tex_env() -> dict[str, str]:
+    """Build environment dict with TeX binaries in PATH, cross-platform."""
+    env = {**os.environ}
+    tex_bin = "/Library/TeX/texbin"
+    if platform.system() != "Windows" and Path(tex_bin).is_dir():
+        env["PATH"] = f"{tex_bin}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
+async def _run_subprocess(
+    cmd_args: list[str],
+    cwd: str,
+    env: dict[str, str],
+    timeout: float,
+) -> tuple[int, str, str]:
+    """Run a subprocess with Windows-compatible fallback.
+
+    On Windows with SelectorEventLoop, asyncio.create_subprocess_exec raises
+    NotImplementedError. Falls back to subprocess.run in a thread.
+    """
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+            env=env,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=timeout,
+        )
+        return (
+            process.returncode or 0,
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+        )
+    except NotImplementedError:
+        logger.debug(
+            "asyncio subprocess not supported on this event loop, using sync fallback"
+        )
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                cmd_args,
+                capture_output=True,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+            )
+            return (
+                result.returncode,
+                result.stdout.decode("utf-8", errors="replace"),
+                result.stderr.decode("utf-8", errors="replace"),
+            )
+        except subprocess.TimeoutExpired:
+            raise asyncio.TimeoutError()
+
+
 def _copy_support_dirs(support_dirs: list[Path], target_dir: Path) -> None:
     """Copy support directories (cls/sty/bst etc.) into the compilation target."""
     for src_dir in support_dirs:
@@ -272,33 +332,28 @@ async def compile_latex(
     tex_path = output_dir / "document.tex"
     tex_path.write_text(latex_content, encoding="utf-8")
 
-    env = {**os.environ, "PATH": f"/Library/TeX/texbin:{os.environ.get('PATH', '')}"}
+    env = _build_tex_env()
 
-    cmd_args = [
-        settings.LATEX_CMD, "-xelatex",
-        "-interaction=nonstopmode", "-no-shell-escape", "document.tex",
-    ]
+    # `-xelatex` is a latexmk flag (select xelatex engine); when the user
+    # configures LATEX_CMD to call xelatex/lualatex directly, omit it.
+    is_latexmk = "latexmk" in Path(settings.LATEX_CMD).name
+    cmd_args = [settings.LATEX_CMD]
+    if is_latexmk:
+        cmd_args.append("-xelatex")
+    cmd_args += ["-synctex=1", "-interaction=nonstopmode", "-no-shell-escape", "document.tex"]
     logger.info("compile_latex: cmd=%s  cwd=%s", " ".join(cmd_args), output_dir)
-    logger.debug("compile_latex: PATH=%s", env["PATH"])
+    logger.debug("compile_latex: PATH=%s", env.get("PATH", ""))
 
     try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd_args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(output_dir),
-            env=env,
+        returncode, log_text, err_text = await _run_subprocess(
+            cmd_args, cwd=str(output_dir), env=env, timeout=60,
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
-
-        log_text = stdout.decode("utf-8", errors="replace")
-        err_text = stderr.decode("utf-8", errors="replace")
         full_log = log_text + "\n" + err_text
 
-        logger.debug("compile_latex: return_code=%s  log_length=%d", process.returncode, len(full_log))
+        logger.debug("compile_latex: return_code=%s  log_length=%d", returncode, len(full_log))
 
         pdf_path = output_dir / "document.pdf"
-        if process.returncode == 0 and pdf_path.exists():
+        if returncode == 0 and pdf_path.exists():
             logger.info("compile_latex: success, pdf=%s", pdf_path)
             return CompileResult(
                 success=True,
@@ -316,7 +371,7 @@ async def compile_latex(
                 # PDF was updated during this run — return it with warnings
                 logger.warning(
                     "compile_latex: latexmk returned %s but PDF was updated, treating as partial success. errors=%s",
-                    process.returncode, errors[:3],
+                    returncode, errors[:3],
                 )
                 return CompileResult(
                     success=True,
@@ -327,7 +382,7 @@ async def compile_latex(
             else:
                 logger.warning(
                     "compile_latex: failed (rc=%s), PDF is stale. errors=%s",
-                    process.returncode, errors[:5],
+                    returncode, errors[:5],
                 )
         else:
             logger.warning("compile_latex: failed, errors=%s", errors[:5])
@@ -374,38 +429,28 @@ async def validate_latex_syntax(
         tex_path = work_dir / "validate.tex"
         tex_path.write_text(latex_content, encoding="utf-8")
 
-        env = {**os.environ, "PATH": f"/Library/TeX/texbin:{os.environ.get('PATH', '')}"}
+        env = _build_tex_env()
 
         cmd_args = [
             "xelatex", "-draftmode", "-interaction=nonstopmode",
             "-no-shell-escape", "-halt-on-error", "validate.tex",
         ]
         logger.info("validate_latex_syntax: cmd=%s  cwd=%s", " ".join(cmd_args), work_dir)
-        logger.debug("validate_latex_syntax: PATH=%s", env["PATH"])
+        logger.debug("validate_latex_syntax: PATH=%s", env.get("PATH", ""))
 
         try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd_args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(work_dir),
-                env=env,
+            returncode, log_text, err_text = await _run_subprocess(
+                cmd_args, cwd=str(work_dir), env=env, timeout=30,
             )
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=30
-            )
-
-            log_text = stdout.decode("utf-8", errors="replace")
-            err_text = stderr.decode("utf-8", errors="replace")
             full_log = log_text + "\n" + err_text
 
             errors = _extract_errors(full_log)
             if errors:
                 logger.warning("validate_latex_syntax: errors=%s", errors[:5])
             else:
-                logger.debug("validate_latex_syntax: ok, return_code=%s", process.returncode)
+                logger.debug("validate_latex_syntax: ok, return_code=%s", returncode)
             return CompileResult(
-                success=process.returncode == 0,
+                success=returncode == 0,
                 log=full_log,
                 errors=errors,
             )

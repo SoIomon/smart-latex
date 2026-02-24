@@ -8,10 +8,12 @@ import { autocompletion } from '@codemirror/autocomplete';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
 import SelectionToolbar from './SelectionToolbar';
 import { Tooltip } from 'antd';
+import { useEditorStore } from '../../stores/editorStore';
 
 interface LatexEditorProps {
   value: string;
   onChange: (value: string) => void;
+  onForwardSync?: (line: number, column: number) => void;
 }
 
 interface SelectionInfo {
@@ -20,6 +22,8 @@ interface SelectionInfo {
   to: number;
   position: { top: number; left: number };
 }
+
+let programmaticScroll = false; // flag to suppress scroll-triggered forward sync during scrollIntoView
 
 // Simple diff: compute minimal changes between old and new text
 function computeChanges(oldText: string, newText: string): ChangeSpec[] {
@@ -47,16 +51,19 @@ function computeChanges(oldText: string, newText: string): ChangeSpec[] {
   return [{ from, to, insert }];
 }
 
-export default function LatexEditor({ value, onChange }: LatexEditorProps) {
+export default function LatexEditor({ value, onChange, onForwardSync }: LatexEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onForwardSyncRef = useRef(onForwardSync);
+  onForwardSyncRef.current = onForwardSync;
 
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo | null>(null);
   const [toolbarVisible, setToolbarVisible] = useState(false);
   const [showSelectionHint, setShowSelectionHint] = useState(false);
   const selectionHintShownRef = useRef(false);
+  const dblClickFiredRef = useRef(false);
 
   const handleCloseToolbar = useCallback(() => {
     setToolbarVisible(false);
@@ -87,20 +94,36 @@ export default function LatexEditor({ value, onChange }: LatexEditorProps) {
         autocompletion(),
         highlightSelectionMatches(),
         StreamLanguage.define(stex),
-        keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+        keymap.of([
+          ...defaultKeymap,
+          ...historyKeymap,
+          ...searchKeymap,
+          indentWithTab,
+        ]),
+        EditorView.domEventHandlers({
+          dblclick: (event, view) => {
+            const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+            if (pos !== null) {
+              const line = view.state.doc.lineAt(pos);
+              dblClickFiredRef.current = true;
+              setTimeout(() => { dblClickFiredRef.current = false; }, 200);
+              onForwardSyncRef.current?.(line.number, 0);
+            }
+            return false; // allow default word selection
+          },
+        }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             onChangeRef.current(update.state.doc.toString());
           }
-          // Detect selection changes
+          // Detect selection changes — only show toolbar for drag selections, not double-click
           if (update.selectionSet || update.docChanged) {
             const { from, to } = update.state.selection.main;
-            if (from !== to) {
+            if (from !== to && !dblClickFiredRef.current) {
               const selectedText = update.state.sliceDoc(from, to);
               if (selectedText.trim().length > 0) {
                 const coords = update.view.coordsAtPos(from);
                 if (coords) {
-                  // Clamp position within viewport
                   const top = Math.max(coords.top - 44, 4);
                   const left = Math.max(Math.min(coords.left, window.innerWidth - 400), 10);
                   setSelectionInfo({
@@ -111,7 +134,6 @@ export default function LatexEditor({ value, onChange }: LatexEditorProps) {
                   });
                   setToolbarVisible(true);
 
-                  // Show hint tooltip on first selection
                   if (!selectionHintShownRef.current) {
                     selectionHintShownRef.current = true;
                     setShowSelectionHint(true);
@@ -140,10 +162,12 @@ export default function LatexEditor({ value, onChange }: LatexEditorProps) {
     });
 
     viewRef.current = view;
+    useEditorStore.getState().setEditorView(view);
 
     return () => {
       view.destroy();
       viewRef.current = null;
+      useEditorStore.getState().setEditorView(null);
     };
     // Only initialize once
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -165,6 +189,24 @@ export default function LatexEditor({ value, onChange }: LatexEditorProps) {
       }
     }
   }, [value]);
+
+  // Scroll editor to target line (inverse sync from PDF)
+  const syncTargetLine = useEditorStore((s) => s.syncTargetLine);
+  const syncSource = useEditorStore((s) => s.syncSource);
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || syncTargetLine === null || syncSource === 'editor') return;
+    const lineCount = view.state.doc.lines;
+    if (syncTargetLine < 1 || syncTargetLine > lineCount) return;
+    const line = view.state.doc.line(syncTargetLine);
+    programmaticScroll = true;
+    view.dispatch({
+      effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+    });
+    useEditorStore.getState().setSyncTargetLine(null);
+    // Clear flag after scroll settles
+    setTimeout(() => { programmaticScroll = false; }, 300);
+  }, [syncTargetLine, syncSource]);
 
   return (
     <div style={{ height: '100%', width: '100%', overflow: 'hidden', position: 'relative' }}>

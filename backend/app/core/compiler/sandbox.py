@@ -26,6 +26,9 @@ def cleanup_sandbox(sandbox_dir: Path):
         try:
             if f.is_dir():
                 continue  # keep subdirectories (images, support files)
+            # .synctex.gz has double extension; Path.suffix only returns .gz
+            if f.name.endswith(".synctex.gz"):
+                continue
             if f.suffix not in _KEEP_SUFFIXES:
                 f.unlink()
         except OSError as e:

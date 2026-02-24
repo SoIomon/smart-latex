@@ -16,6 +16,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { useChatStore } from '../../stores/chatStore';
 import { compileLatex, compileAndFix, getPdfUrl, downloadPdf, downloadWord } from '../../api/compiler';
+import { fetchLineMap } from '../../api/synctex';
 import DocumentPanel from '../../components/DocumentPanel';
 import EditorPanel from '../../components/Editor';
 import ChatPanel from '../../components/ChatPanel';
@@ -40,6 +41,7 @@ export default function Workspace() {
     setCompileErrors,
     compileLog,
     setCompileLog,
+    setLineMap,
   } = useEditorStore();
   const { clearMessages } = useChatStore();
   const [saving, setSaving] = useState(false);
@@ -126,6 +128,7 @@ export default function Workspace() {
           } else if (event.type === 'done') {
             if (event.data.success) {
               setPdfUrl(getPdfUrl(projectId) + '?t=' + Date.now());
+              fetchLineMap(projectId).then((r) => setLineMap(r.line_map)).catch(() => {});
               const msg = event.data.attempts && event.data.attempts > 1
                 ? `编译成功（AI 修正了 ${event.data.attempts - 1} 次）`
                 : '编译成功';
@@ -156,6 +159,7 @@ export default function Workspace() {
         const result = await compileLatex(projectId, content);
         if (result.success) {
           setPdfUrl(getPdfUrl(projectId) + '?t=' + Date.now());
+          fetchLineMap(projectId).then((r) => setLineMap(r.line_map)).catch(() => {});
           message.success('编译成功');
           setShowErrorPanel(false);
           setCompileErrors([]);
@@ -183,7 +187,7 @@ export default function Workspace() {
     } finally {
       setCompiling(false);
     }
-  }, [projectId, setCompiling, setCompileResult, setPdfUrl, setLatexContent, setCompileErrors, setCompileLog]);
+  }, [projectId, setCompiling, setCompileResult, setPdfUrl, setLatexContent, setCompileErrors, setCompileLog, setLineMap]);
 
   // Auto-compile: debounce on latexContent change, pause during generation
   useEffect(() => {

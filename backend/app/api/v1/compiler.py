@@ -13,6 +13,7 @@ from app.config import settings
 from app.core.compiler.engine import compile_latex
 from app.core.compiler.sandbox import create_sandbox, cleanup_sandbox
 from app.core.compiler.error_parser import parse_xelatex_log
+from app.core.compiler.synctex import forward_sync, inverse_sync, build_line_map
 from app.core.compiler.word_preprocessor import preprocess_latex_for_word
 from app.core.compiler.latex2docx import convert_latex_to_docx
 from app.core.llm.fix_agent import run_fix_agent_loop
@@ -24,6 +25,15 @@ from app.services import project_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["compiler"])
+
+
+def _get_all_support_dirs(project: Project) -> list[Path]:
+    """获取模板 support_dirs + 项目图片目录。"""
+    dirs = get_template_support_dirs(project.template_id) if project.template_id else []
+    images_dir = settings.storage_path / project.id / "images"
+    if images_dir.is_dir():
+        dirs.append(images_dir)
+    return dirs
 
 
 @router.post("/projects/{project_id}/compile", response_model=CompileResponse)
@@ -38,7 +48,7 @@ async def compile_project(
 
     output_dir = settings.storage_path / project.id / "output"
     sandbox = create_sandbox(output_dir)
-    support_dirs = get_template_support_dirs(project.template_id) if project.template_id else []
+    support_dirs = _get_all_support_dirs(project)
 
     result = await compile_latex(latex_content, sandbox, support_dirs=support_dirs or None)
     cleanup_sandbox(sandbox)
@@ -67,7 +77,7 @@ async def compile_and_fix(
         raise HTTPException(status_code=400, detail="No LaTeX content to compile")
 
     max_retries = 2
-    support_dirs = get_template_support_dirs(project.template_id) if project.template_id else []
+    support_dirs = _get_all_support_dirs(project)
 
     async def event_stream():
         current_latex = latex_content
@@ -243,7 +253,7 @@ async def download_word(project: Project = Depends(get_project)):
     if not latex_content:
         raise HTTPException(status_code=404, detail="No LaTeX content. Generate or edit LaTeX first.")
 
-    support_dirs = get_template_support_dirs(project.template_id) if project.template_id else []
+    support_dirs = _get_all_support_dirs(project)
     compile_result = await compile_latex(
         latex_content,
         build_dir,
@@ -298,6 +308,58 @@ def _should_rebuild_frontmatter(latex_content: str, _metadata) -> bool:
             latex_content,
         )
     )
+
+
+@router.get("/projects/{project_id}/synctex/forward")
+async def synctex_forward(
+    line: int,
+    column: int = 0,
+    project: Project = Depends(get_project),
+):
+    """Forward sync: source line → PDF position."""
+    build_dir = settings.storage_path / project.id / "output" / "build"
+    synctex_gz = build_dir / "document.synctex.gz"
+    if not synctex_gz.exists():
+        raise HTTPException(status_code=404, detail="SyncTeX data not found. Compile first.")
+    result = await forward_sync(line, column, "document.tex", "document.pdf", str(build_dir))
+    if result is None:
+        raise HTTPException(status_code=404, detail="No sync data for this position.")
+    return {"page": result.page, "x": result.x, "y": result.y, "width": result.width, "height": result.height}
+
+
+@router.get("/projects/{project_id}/synctex/inverse")
+async def synctex_inverse(
+    page: int,
+    x: float,
+    y: float,
+    project: Project = Depends(get_project),
+):
+    """Inverse sync: PDF click → source line."""
+    build_dir = settings.storage_path / project.id / "output" / "build"
+    synctex_gz = build_dir / "document.synctex.gz"
+    if not synctex_gz.exists():
+        raise HTTPException(status_code=404, detail="SyncTeX data not found. Compile first.")
+    result = await inverse_sync(page, x, y, "document.pdf", str(build_dir))
+    if result is None:
+        raise HTTPException(status_code=404, detail="No sync data for this position.")
+    return {"filename": result.filename, "line": result.line, "column": result.column}
+
+
+@router.get("/projects/{project_id}/synctex/linemap")
+async def synctex_linemap(
+    project: Project = Depends(get_project),
+):
+    """Get line→page mapping for scroll synchronization."""
+    build_dir = settings.storage_path / project.id / "output" / "build"
+    synctex_gz = build_dir / "document.synctex.gz"
+    if not synctex_gz.exists():
+        raise HTTPException(status_code=404, detail="SyncTeX data not found. Compile first.")
+    tex_path = build_dir / "document.tex"
+    if not tex_path.exists():
+        raise HTTPException(status_code=404, detail="Source file not found.")
+    total_lines = len(tex_path.read_text(encoding="utf-8").splitlines())
+    line_map = await build_line_map("document.tex", "document.pdf", str(build_dir), total_lines)
+    return {"line_map": line_map, "total_lines": total_lines}
 
 
 @router.get("/projects/{project_id}/pdf")
