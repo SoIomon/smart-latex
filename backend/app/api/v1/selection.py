@@ -6,6 +6,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.api.schemas.schemas import EditSelectionRequest
 from app.core.llm.chains import edit_selection_stream
+from app.core.llm.output_parsers import extract_latex
 from app.dependencies import get_db, get_project
 from app.models.models import Project
 
@@ -29,7 +30,9 @@ async def edit_selection(
                 full_response += chunk
                 yield {"event": "chunk", "data": json.dumps({"content": chunk})}
 
-            yield {"event": "done", "data": json.dumps({"content": full_response})}
+            # Strip markdown code-block wrappers (```latex ... ```) if present
+            cleaned = extract_latex(full_response)
+            yield {"event": "done", "data": json.dumps({"content": cleaned})}
 
         except Exception as e:
             yield {"event": "error", "data": json.dumps({"error": str(e)})}

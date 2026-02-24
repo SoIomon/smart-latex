@@ -11,6 +11,30 @@ from dataclasses import dataclass, field
 
 MAX_RESULT_CHARS = 4000
 
+# ---------------------------------------------------------------------------
+# Chinese reference → LaTeX environment mapping
+# ---------------------------------------------------------------------------
+
+# Maps Chinese reference prefixes to LaTeX patterns to search for
+_REFERENCE_LATEX_PATTERNS: dict[str, list[str]] = {
+    "表": [r"\\begin\{table", r"\\caption\{"],
+    "图": [r"\\begin\{figure", r"\\includegraphics"],
+    "公式": [r"\\begin\{equation", r"\\begin\{align"],
+    "方程": [r"\\begin\{equation", r"\\begin\{align"],
+    "定理": [r"\\begin\{theorem"],
+    "定义": [r"\\begin\{definition"],
+    "引理": [r"\\begin\{lemma"],
+    "推论": [r"\\begin\{corollary"],
+    "算法": [r"\\begin\{algorithm"],
+    "代码": [r"\\begin\{lstlisting", r"\\begin\{minted"],
+    "列表": [r"\\begin\{enumerate", r"\\begin\{itemize"],
+}
+
+# Matches patterns like "表2.1", "图 3", "公式1.2", "表 2-1", "方程（1）" etc.
+_REFERENCE_RE = re.compile(
+    r"^(" + "|".join(_REFERENCE_LATEX_PATTERNS.keys()) + r")\s*[\d\.\-\(\)（）]*$"
+)
+
 
 @dataclass
 class DocumentState:
@@ -58,6 +82,7 @@ TOOL_DEFINITIONS: list[dict] = [
             "description": (
                 "在文档中搜索文本（支持正则表达式），返回匹配行及上下文。"
                 "最多返回 20 条匹配结果。"
+                "支持自动识别\u201c表2.1\u201d\u201c图3.1\u201d等编号引用并搜索对应 LaTeX 环境。"
             ),
             "parameters": {
                 "type": "object",
@@ -170,15 +195,12 @@ def get_document_outline(doc: DocumentState) -> str:
     return "\n".join(results)
 
 
-def search_text(doc: DocumentState, query: str, context_lines: int = 2) -> str:
-    try:
-        pattern = re.compile(query, re.IGNORECASE)
-    except re.error:
-        pattern = re.compile(re.escape(query), re.IGNORECASE)
-
+def _find_matches(
+    doc: DocumentState, pattern: re.Pattern, context_lines: int, limit: int = 20
+) -> list[str]:
+    """Core search: return formatted match blocks for *pattern*."""
     matches: list[str] = []
     total = doc.total_lines
-
     for idx, line in enumerate(doc.lines):
         if pattern.search(line):
             start = max(0, idx - context_lines)
@@ -188,13 +210,71 @@ def search_text(doc: DocumentState, query: str, context_lines: int = 2) -> str:
                 marker = ">>>" if i == idx else "   "
                 block.append(f"{marker} L{i + 1}: {doc.lines[i].rstrip()}")
             matches.append("\n".join(block))
-            if len(matches) >= 20:
+            if len(matches) >= limit:
                 break
+    return matches
 
+
+def _try_reference_fallback(
+    doc: DocumentState, query: str, context_lines: int
+) -> str | None:
+    """If *query* looks like a Chinese numbered reference (e.g. '表2.1'),
+    search for the corresponding LaTeX environments instead.
+    Returns a formatted result string, or None if the query doesn't match."""
+    m = _REFERENCE_RE.match(query.strip())
+    if not m:
+        return None
+
+    prefix = m.group(1)
+    latex_patterns = _REFERENCE_LATEX_PATTERNS.get(prefix)
+    if not latex_patterns:
+        return None
+
+    # Combine all LaTeX patterns with OR
+    combined = "|".join(latex_patterns)
+    try:
+        pat = re.compile(combined, re.IGNORECASE)
+    except re.error:
+        return None
+
+    matches = _find_matches(doc, pat, context_lines)
     if not matches:
-        return f"未找到匹配 '{query}' 的内容。"
-    header = f"找到 {len(matches)} 处匹配：\n"
+        return (
+            f"未找到匹配 '{query}' 的内容。\n"
+            f"提示：\u201c{prefix}X.X\u201d的编号是 LaTeX 编译时自动生成的，源码中不存在。"
+            f"已自动搜索 {combined} 等环境，也未找到。"
+            f"你可以尝试搜索该{prefix}格 caption 中的关键词来定位。"
+        )
+
+    header = (
+        f"注意：\u201c{query}\u201d的编号是 LaTeX 编译时自动生成的，源码中不存在。"
+        f"已自动搜索对应的 LaTeX 环境（{combined}），找到 {len(matches)} 处：\n"
+    )
     return _truncate(header + "\n---\n".join(matches))
+
+
+def search_text(doc: DocumentState, query: str, context_lines: int = 2) -> str:
+    try:
+        pattern = re.compile(query, re.IGNORECASE)
+    except re.error:
+        pattern = re.compile(re.escape(query), re.IGNORECASE)
+
+    matches = _find_matches(doc, pattern, context_lines)
+
+    if matches:
+        header = f"找到 {len(matches)} 处匹配：\n"
+        return _truncate(header + "\n---\n".join(matches))
+
+    # Fallback: try to detect Chinese numbered references
+    fallback = _try_reference_fallback(doc, query, context_lines)
+    if fallback:
+        return fallback
+
+    return (
+        f"未找到匹配 '{query}' 的内容。"
+        f"提示：如果你在搜索编号（如\u201c表X.X\u201d\u201c图X.X\u201d），这些编号是编译时生成的，"
+        f"请尝试搜索 caption 中的关键词或对应的 LaTeX 环境名（如 \\\\begin{{table}}）。"
+    )
 
 
 def read_lines(doc: DocumentState, start_line: int, end_line: int) -> str:

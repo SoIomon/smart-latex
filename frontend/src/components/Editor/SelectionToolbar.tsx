@@ -74,8 +74,9 @@ export default function SelectionToolbar({
         if (event.type === 'chunk') {
           result += event.data;
         } else if (event.type === 'done') {
-          // done event carries the full content; use it if result is empty
-          if (!result && event.data) {
+          // done event carries cleaned content (extract_latex applied);
+          // prefer it over raw streamed chunks
+          if (event.data) {
             result = event.data;
           }
           break;
@@ -90,6 +91,8 @@ export default function SelectionToolbar({
         onReplace(selectionFrom, selectionTo, result);
         message.success('AI 修改完成');
         onClose();
+      } else {
+        message.error('AI 返回内容为空，请重试');
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '请求失败';

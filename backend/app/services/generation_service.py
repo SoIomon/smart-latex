@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.compiler.engine import validate_latex_syntax
 from app.core.llm.chains import (
     analyze_document,
@@ -328,6 +329,11 @@ async def generate_latex_pipeline(
     doc_class = _detect_document_class(template_id)
     section_commands = _get_section_commands(doc_class)
     support_dirs = get_template_support_dirs(template_id)
+
+    # Add project images directory for compilation validation
+    images_dir = settings.storage_path / project_id / "images"
+    if images_dir.is_dir():
+        support_dirs.append(images_dir)
 
     # ===== Stage 1: Analyze each document =====
     yield {

@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -10,6 +11,53 @@ from fastapi.staticfiles import StaticFiles
 from app.api.router import api_router
 from app.config import settings
 from app.models.database import init_db, close_db
+
+
+def _setup_logging() -> None:
+    """Configure root logger with console + rotating file handlers.
+
+    Guarded against duplicate handlers on uvicorn --reload.
+    """
+    root = logging.getLogger()
+
+    # Prevent duplicate handlers when module is re-imported (uvicorn --reload)
+    if getattr(root, "_smart_latex_configured", False):
+        return
+    root._smart_latex_configured = True  # type: ignore[attr-defined]
+
+    level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
+
+    fmt = logging.Formatter(
+        "%(asctime)s | %(levelname)-7s | %(name)s:%(lineno)d | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    root.setLevel(level)
+
+    # Console handler (respects uvicorn's own output)
+    console = logging.StreamHandler()
+    console.setLevel(level)
+    console.setFormatter(fmt)
+    root.addHandler(console)
+
+    # File handler — rotate at 5 MB, keep 3 backups
+    log_path = Path(settings.LOG_FILE)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    file_h = logging.handlers.RotatingFileHandler(
+        log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8",
+    )
+    file_h.setLevel(level)
+    file_h.setFormatter(fmt)
+    root.addHandler(file_h)
+
+    # Quiet noisy third-party loggers
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+
+
+_setup_logging()
 
 logger = logging.getLogger(__name__)
 

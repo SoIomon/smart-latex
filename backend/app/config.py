@@ -14,6 +14,9 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+    LOG_LEVEL: str = "DEBUG"
+    LOG_FILE: str = "logs/smart_latex.log"
+
     @property
     def storage_path(self) -> Path:
         path = Path(self.STORAGE_DIR)

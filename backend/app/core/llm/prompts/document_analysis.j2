@@ -23,7 +23,8 @@
       "key_points": ["要点1", "要点2"],
       "has_data": false,
       "has_tables": false,
-      "has_formulas": false
+      "has_formulas": false,
+      "has_images": false
     }
   ],
   "abstract": "全文摘要（200-300字）",
@@ -36,3 +37,4 @@
 1. sections 要尽量保留原文的章节结构
 2. summary 要包含关键数据、结论等实质内容，不要泛泛而谈
 3. 只输出 JSON，不要包含其他文字
+4. 如果文档内容中出现 [IMAGE: 文件名, 描述: ..., width=...] 标记，说明该位置有图片。请在对应 section 中设置 has_images 为 true，并在 summary 中简要提及图片内容

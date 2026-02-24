@@ -31,6 +31,10 @@ frontend/dist/
 build/
 dist/
 
+# Logs (keep .gitkeep)
+backend/logs/*
+!backend/logs/.gitkeep
+
 # Test cache
 .pytest_cache/
 

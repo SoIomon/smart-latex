@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -6,6 +8,8 @@ from jinja2 import Environment, FileSystemLoader
 
 from app.core.llm.client import doubao_client
 from app.core.llm.output_parsers import extract_json, extract_latex
+
+logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 _prompt_env = Environment(loader=FileSystemLoader(str(PROMPTS_DIR)), autoescape=False)
@@ -88,35 +92,166 @@ async def chat_modify_stream(
         yield chunk
 
 
-async def analyze_document(
-    filename: str, content: str, doc_index: int, total_docs: int
+def _split_into_chunks(content: str, max_chars: int = 12000) -> list[str]:
+    """Split content into chunks at paragraph boundaries, each ≤ max_chars."""
+    if len(content) <= max_chars:
+        return [content]
+
+    chunks: list[str] = []
+    remaining = content
+    while remaining:
+        if len(remaining) <= max_chars:
+            chunks.append(remaining)
+            break
+        # Find the last paragraph break within the limit
+        split_pos = remaining.rfind("\n\n", 0, max_chars)
+        if split_pos == -1:
+            # No paragraph break found; try single newline
+            split_pos = remaining.rfind("\n", 0, max_chars)
+        if split_pos == -1:
+            # No newline at all; hard cut at max_chars
+            split_pos = max_chars
+        chunks.append(remaining[:split_pos])
+        remaining = remaining[split_pos:].lstrip("\n")
+    return chunks
+
+
+async def _analyze_chunk(
+    filename: str, chunk: str, chunk_index: int, total_chunks: int
 ) -> dict:
-    """Analyze a single document and extract structured info."""
-    # Truncate very long documents to avoid token limits
-    truncated = content[:15000] if len(content) > 15000 else content
+    """Analyze a single chunk of a document using the same LLM prompt."""
     prompt = _render_prompt(
         "document_analysis.j2",
         filename=filename,
-        content=truncated,
-        doc_index=doc_index,
-        total_docs=total_docs,
+        content=chunk,
+        doc_index=chunk_index,
+        total_docs=total_chunks,
     )
     messages = [{"role": "user", "content": prompt}]
-    response = await doubao_client.chat(messages, temperature=0.2)
+    response = await doubao_client.chat(messages, temperature=0.2, max_tokens=8192)
     result = extract_json(response)
     if not result:
-        # Fallback: create a minimal analysis
         result = {
             "title": filename,
             "authors": [],
             "type": "其他",
             "key_topics": [],
-            "sections": [{"heading": "全文", "summary": truncated[:500], "key_points": []}],
-            "abstract": truncated[:300],
+            "sections": [{"heading": "全文", "summary": chunk[:500], "key_points": []}],
+            "abstract": chunk[:300],
             "references": [],
             "importance": "中",
         }
     return result
+
+
+def _merge_chunk_analyses(chunk_results: list, filename: str) -> dict:
+    """Merge analysis results from multiple chunks into a single analysis."""
+    # Filter out exceptions
+    valid: list[dict] = []
+    for r in chunk_results:
+        if isinstance(r, Exception):
+            logger.warning("Chunk analysis failed for %s: %s", filename, r)
+        elif isinstance(r, dict):
+            valid.append(r)
+
+    if not valid:
+        return {
+            "title": filename,
+            "authors": [],
+            "type": "其他",
+            "key_topics": [],
+            "sections": [{"heading": "全文", "summary": "", "key_points": []}],
+            "abstract": "",
+            "references": [],
+            "importance": "中",
+        }
+
+    # Merge sections in order
+    all_sections: list[dict] = []
+    for v in valid:
+        all_sections.extend(v.get("sections", []))
+
+    # Deduplicate key_topics while preserving order
+    seen_topics: set[str] = set()
+    merged_topics: list[str] = []
+    for v in valid:
+        for topic in v.get("key_topics", []):
+            if topic not in seen_topics:
+                seen_topics.add(topic)
+                merged_topics.append(topic)
+
+    # Deduplicate references
+    seen_refs: set[str] = set()
+    merged_refs: list[str] = []
+    for v in valid:
+        for ref in v.get("references", []):
+            ref_str = ref if isinstance(ref, str) else str(ref)
+            if ref_str not in seen_refs:
+                seen_refs.add(ref_str)
+                merged_refs.append(ref)
+
+    # Title / authors / type: first non-empty
+    title = filename
+    authors: list[str] = []
+    doc_type = "其他"
+    for v in valid:
+        if v.get("title") and title == filename:
+            title = v["title"]
+        if v.get("authors") and not authors:
+            authors = v["authors"]
+        if v.get("type") and v["type"] != "其他" and doc_type == "其他":
+            doc_type = v["type"]
+
+    # Abstract: concatenate, cap at 500 chars
+    abstract_parts = [v.get("abstract", "") for v in valid if v.get("abstract")]
+    merged_abstract = " ".join(abstract_parts)[:500]
+
+    # Importance: take the highest
+    importance_order = {"高": 3, "中": 2, "低": 1}
+    best_importance = "中"
+    best_score = 0
+    for v in valid:
+        score = importance_order.get(v.get("importance", "中"), 2)
+        if score > best_score:
+            best_score = score
+            best_importance = v.get("importance", "中")
+
+    return {
+        "title": title,
+        "authors": authors,
+        "type": doc_type,
+        "key_topics": merged_topics,
+        "sections": all_sections,
+        "abstract": merged_abstract,
+        "references": merged_refs,
+        "importance": best_importance,
+    }
+
+
+async def analyze_document(
+    filename: str, content: str, doc_index: int, total_docs: int
+) -> dict:
+    """Analyze a single document and extract structured info.
+
+    For long documents (>12000 chars), splits into chunks, analyzes each
+    concurrently, and merges the results so no content is lost.
+    """
+    chunks = _split_into_chunks(content, max_chars=12000)
+
+    if len(chunks) == 1:
+        # Short document: single-pass analysis (original path)
+        return await _analyze_chunk(filename, chunks[0], doc_index, total_docs)
+
+    # Long document: concurrent chunk analysis
+    logger.info(
+        "Document '%s' split into %d chunks for analysis", filename, len(chunks)
+    )
+    tasks = [
+        _analyze_chunk(filename, chunk, i + 1, len(chunks))
+        for i, chunk in enumerate(chunks)
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return _merge_chunk_analyses(list(results), filename)
 
 
 async def plan_outline(analyses: list[dict], template_id: str) -> dict:
@@ -128,7 +263,7 @@ async def plan_outline(analyses: list[dict], template_id: str) -> dict:
         template_id=template_id,
     )
     messages = [{"role": "user", "content": prompt}]
-    response = await doubao_client.chat(messages, temperature=0.3)
+    response = await doubao_client.chat(messages, temperature=0.3, max_tokens=4096)
     result = extract_json(response)
     if not result or "chapters" not in result:
         # Fallback: single chapter with all docs
