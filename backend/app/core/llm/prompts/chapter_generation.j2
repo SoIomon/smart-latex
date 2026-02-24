@@ -16,6 +16,8 @@
 ## 源文档内容
 以下是该章节对应的源文档分析和原文，请尽可能完整地保留源文档中的关键数据、技术参数、结论等实质性内容，不要概括或省略重要细节：
 
+注意：原文中 [IMAGE: ...] 标记表示源文档中的图片及其内容描述，请按照 LaTeX 代码规范第 13 条处理。
+
 {% for doc in source_documents %}
 ### 源文档 {{ loop.index }}：{{ doc.filename }}
 **分析摘要：** {{ doc.analysis.abstract }}
@@ -28,7 +30,7 @@
 {% endfor %}
 
 **原文内容：**
-{{ doc.content[:10000] }}
+{{ doc.content[:15000] }}
 {% endfor %}
 
 {% if template_rules %}
@@ -49,3 +51,17 @@
 10. 数学符号必须用 LaTeX 命令：≥ 写成 $\geq$，≤ 写成 $\leq$，± 写成 $\pm$，° 写成 $^\circ$，希腊字母用 $\alpha$、$\beta$ 等
 11. 尽量保留源文档中的具体数据、参数、公式，不要用"等"或"..."省略
 12. 正文使用 \songti 字体，标题使用 \heiti 字体（如果模板有此要求）
+13. 源文档中的 [IMAGE: 文件名, 描述: 图片描述, width=宽度cm] 占位符表示原文档中的图片。处理规则：
+   a) figure 环境结构（严格按此格式，不得在 figure 内添加任何额外文字）：
+      \begin{figure}[htbp]
+        \centering
+        \includegraphics[width=宽度]{images/文件名}
+        \caption{简短标题}
+        \label{fig:ch{{ chapter_index }}_文件名去掉扩展名}
+      \end{figure}
+   b) caption 必须简短精炼，不超过 15 个中文字符（如"激光通信终端外观"、"系统架构示意图"）。绝对不要把图片的详细描述放进 caption。
+   c) 图片的详细说明、注释、数据来源等内容，写在 figure 环境之后的正文段落中，如"如图\ref{fig:ch{{ chapter_index }}_xxx}所示，该设备采用了..."
+   d) figure 环境内部只允许 \centering、\includegraphics、\caption、\label 四个命令，禁止放入 \textbf、\small、注释文字、来源说明等任何其他内容。
+   e) 图片路径必须加 images/ 前缀。宽度超过 15cm 时改用 width=0.9\textwidth。
+   f) label 命名规则：fig:ch{{ chapter_index }}_文件名去掉扩展名（加章节前缀防止跨章节重复）。
+14. 引用图片时，必须使用 \ref{fig:ch{{ chapter_index }}_label} 交叉引用，禁止硬编码"图1""图2"等编号。引用格式示例："如图\ref{fig:ch{{ chapter_index }}_xxx}所示"。只引用本章内定义的图片 label，不要引用其他章节的图片。

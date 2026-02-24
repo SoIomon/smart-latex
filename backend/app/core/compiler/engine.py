@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import re
 import shutil
@@ -6,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -126,10 +129,64 @@ def _fix_common_latex_issues(content: str) -> str:
         content,
     )
 
+    # Auto-inject missing packages that LLM-generated content commonly needs
+    content = _inject_missing_packages(content)
+
+    # Deduplicate \label{} to prevent "multiply-defined labels" errors
+    content = _dedup_labels(content)
+
     # Fix truncated LaTeX: close unclosed environments and ensure \end{document}
     content = _fix_truncated_latex(content)
 
     return content
+
+
+def _inject_missing_packages(content: str) -> str:
+    """Auto-inject commonly needed packages when used but not loaded."""
+    if r'\begin{document}' not in content:
+        return content
+
+    # Map: (command/env used in body) → package to inject
+    _PACKAGE_TRIGGERS = [
+        (r'\toprule', 'booktabs'),
+        (r'\midrule', 'booktabs'),
+        (r'\bottomrule', 'booktabs'),
+        (r'\begin{longtable}', 'longtable'),
+        (r'\begin{tabularx}', 'tabularx'),
+        (r'\begin{multirow}', 'multirow'),
+        (r'\multirow{', 'multirow'),
+        (r'\multicolumn{', 'multicol'),
+    ]
+
+    doc_idx = content.index(r'\begin{document}')
+    preamble = content[:doc_idx]
+    body = content[doc_idx:]
+
+    injections = []
+    for trigger, pkg in _PACKAGE_TRIGGERS:
+        if trigger in body and f'\\usepackage{{{pkg}}}' not in preamble and f'{{{pkg}}}' not in preamble:
+            injections.append(f'\\usepackage{{{pkg}}}')
+
+    if not injections:
+        return content
+
+    # Insert before \begin{document}
+    inject_str = '\n'.join(dict.fromkeys(injections))  # deduplicate
+    return preamble.rstrip() + '\n' + inject_str + '\n' + body
+
+
+def _dedup_labels(content: str) -> str:
+    """Detect duplicate \\label{} and auto-suffix to prevent LaTeX errors."""
+    seen: dict[str, int] = {}
+
+    def replace_label(m: re.Match) -> str:
+        label = m.group(1)
+        seen[label] = seen.get(label, 0) + 1
+        if seen[label] == 1:
+            return m.group(0)
+        return f'\\label{{{label}_{seen[label]}}}'
+
+    return re.sub(r'\\label\{([^}]+)\}', replace_label, content)
 
 
 def _fix_centering_in_tabularx(content: str) -> str:
@@ -217,13 +274,16 @@ async def compile_latex(
 
     env = {**os.environ, "PATH": f"/Library/TeX/texbin:{os.environ.get('PATH', '')}"}
 
+    cmd_args = [
+        settings.LATEX_CMD, "-xelatex",
+        "-interaction=nonstopmode", "-no-shell-escape", "document.tex",
+    ]
+    logger.info("compile_latex: cmd=%s  cwd=%s", " ".join(cmd_args), output_dir)
+    logger.debug("compile_latex: PATH=%s", env["PATH"])
+
     try:
         process = await asyncio.create_subprocess_exec(
-            settings.LATEX_CMD,
-            "-xelatex",
-            "-interaction=nonstopmode",
-            "-no-shell-escape",
-            "document.tex",
+            *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(output_dir),
@@ -235,28 +295,58 @@ async def compile_latex(
         err_text = stderr.decode("utf-8", errors="replace")
         full_log = log_text + "\n" + err_text
 
+        logger.debug("compile_latex: return_code=%s  log_length=%d", process.returncode, len(full_log))
+
         pdf_path = output_dir / "document.pdf"
-        if pdf_path.exists():
+        if process.returncode == 0 and pdf_path.exists():
+            logger.info("compile_latex: success, pdf=%s", pdf_path)
             return CompileResult(
                 success=True,
                 pdf_path=str(pdf_path),
                 log=full_log,
             )
+
+        # latexmk failed but may have produced a PDF with partial content.
+        # Record the mtime BEFORE writing .tex so we can detect stale PDFs.
+        errors = _extract_errors(full_log)
+        if pdf_path.exists() and tex_path.exists():
+            pdf_mtime = pdf_path.stat().st_mtime
+            tex_mtime = tex_path.stat().st_mtime
+            if pdf_mtime >= tex_mtime:
+                # PDF was updated during this run — return it with warnings
+                logger.warning(
+                    "compile_latex: latexmk returned %s but PDF was updated, treating as partial success. errors=%s",
+                    process.returncode, errors[:3],
+                )
+                return CompileResult(
+                    success=True,
+                    pdf_path=str(pdf_path),
+                    log=full_log,
+                    errors=errors,
+                )
+            else:
+                logger.warning(
+                    "compile_latex: failed (rc=%s), PDF is stale. errors=%s",
+                    process.returncode, errors[:5],
+                )
         else:
-            errors = _extract_errors(full_log)
-            return CompileResult(
-                success=False,
-                log=full_log,
-                errors=errors if errors else ["PDF file was not generated."],
-            )
+            logger.warning("compile_latex: failed, errors=%s", errors[:5])
+        logger.debug("compile_latex: full log\n%s", full_log[-3000:])
+        return CompileResult(
+            success=False,
+            log=full_log,
+            errors=errors if errors else ["PDF file was not generated."],
+        )
 
     except asyncio.TimeoutError:
+        logger.error("compile_latex: timed out (60s)  cwd=%s", output_dir)
         return CompileResult(
             success=False,
             log="Compilation timed out after 60 seconds.",
             errors=["Compilation timed out."],
         )
     except FileNotFoundError:
+        logger.error("compile_latex: command not found: %s", settings.LATEX_CMD)
         return CompileResult(
             success=False,
             log=f"Command '{settings.LATEX_CMD}' not found.",
@@ -286,14 +376,16 @@ async def validate_latex_syntax(
 
         env = {**os.environ, "PATH": f"/Library/TeX/texbin:{os.environ.get('PATH', '')}"}
 
+        cmd_args = [
+            "xelatex", "-draftmode", "-interaction=nonstopmode",
+            "-no-shell-escape", "-halt-on-error", "validate.tex",
+        ]
+        logger.info("validate_latex_syntax: cmd=%s  cwd=%s", " ".join(cmd_args), work_dir)
+        logger.debug("validate_latex_syntax: PATH=%s", env["PATH"])
+
         try:
             process = await asyncio.create_subprocess_exec(
-                "xelatex",
-                "-draftmode",
-                "-interaction=nonstopmode",
-                "-no-shell-escape",
-                "-halt-on-error",
-                "validate.tex",
+                *cmd_args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(work_dir),
@@ -308,18 +400,24 @@ async def validate_latex_syntax(
             full_log = log_text + "\n" + err_text
 
             errors = _extract_errors(full_log)
+            if errors:
+                logger.warning("validate_latex_syntax: errors=%s", errors[:5])
+            else:
+                logger.debug("validate_latex_syntax: ok, return_code=%s", process.returncode)
             return CompileResult(
                 success=process.returncode == 0,
                 log=full_log,
                 errors=errors,
             )
         except asyncio.TimeoutError:
+            logger.error("validate_latex_syntax: timed out (30s)  cwd=%s", work_dir)
             return CompileResult(
                 success=False,
                 log="Validation timed out after 30 seconds.",
                 errors=["Validation timed out."],
             )
         except FileNotFoundError:
+            logger.error("validate_latex_syntax: xelatex not found in PATH")
             return CompileResult(
                 success=False,
                 log="xelatex not found.",
