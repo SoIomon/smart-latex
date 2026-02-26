@@ -47,5 +47,5 @@ backend/logs/*
 *.fls
 *.fdb_latexmk
 
-# Debug comparison files
-test_doc/对比_*
+# Test documents (local only)
+test_doc/
