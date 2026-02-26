@@ -110,6 +110,7 @@ async def _run_synctex(args: list[str], cwd: str) -> str | None:
     except NotImplementedError:
         # Windows fallback
         import subprocess
+        logger.debug("synctex: using sync subprocess fallback (Windows)")
         try:
             result = await asyncio.to_thread(
                 subprocess.run,
@@ -117,9 +118,18 @@ async def _run_synctex(args: list[str], cwd: str) -> str | None:
                 capture_output=True, cwd=cwd, env=env, timeout=10,
             )
             if result.returncode != 0:
+                logger.warning(
+                    "synctex %s failed (rc=%s): %s",
+                    args[0], result.returncode,
+                    result.stderr.decode(errors="replace"),
+                )
                 return None
             return result.stdout.decode("utf-8", errors="replace")
-        except Exception:
+        except FileNotFoundError:
+            logger.warning("synctex command not found in PATH (Windows fallback)")
+            return None
+        except Exception as exc:
+            logger.warning("synctex %s error in Windows fallback: %s", args[0], exc)
             return None
 
 

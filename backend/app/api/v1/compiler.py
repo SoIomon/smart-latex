@@ -319,11 +319,14 @@ async def synctex_forward(
     """Forward sync: source line → PDF position."""
     build_dir = settings.storage_path / project.id / "output" / "build"
     synctex_gz = build_dir / "document.synctex.gz"
+    logger.info("synctex forward: line=%d col=%d synctex.gz_exists=%s", line, column, synctex_gz.exists())
     if not synctex_gz.exists():
         raise HTTPException(status_code=404, detail="SyncTeX data not found. Compile first.")
     result = await forward_sync(line, column, "document.tex", "document.pdf", str(build_dir))
     if result is None:
+        logger.warning("synctex forward: no result for line=%d col=%d", line, column)
         raise HTTPException(status_code=404, detail="No sync data for this position.")
+    logger.info("synctex forward: line=%d → page=%d y=%.1f", line, result.page, result.y)
     return {"page": result.page, "x": result.x, "y": result.y, "width": result.width, "height": result.height}
 
 
@@ -337,11 +340,14 @@ async def synctex_inverse(
     """Inverse sync: PDF click → source line."""
     build_dir = settings.storage_path / project.id / "output" / "build"
     synctex_gz = build_dir / "document.synctex.gz"
+    logger.info("synctex inverse: page=%d x=%.1f y=%.1f synctex.gz_exists=%s", page, x, y, synctex_gz.exists())
     if not synctex_gz.exists():
         raise HTTPException(status_code=404, detail="SyncTeX data not found. Compile first.")
     result = await inverse_sync(page, x, y, "document.pdf", str(build_dir))
     if result is None:
+        logger.warning("synctex inverse: no result for page=%d x=%.1f y=%.1f", page, x, y)
         raise HTTPException(status_code=404, detail="No sync data for this position.")
+    logger.info("synctex inverse: page=%d → line=%d", page, result.line)
     return {"filename": result.filename, "line": result.line, "column": result.column}
 
 
