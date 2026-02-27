@@ -14,25 +14,24 @@ export default function Settings() {
   const [currentMaskedKey, setCurrentMaskedKey] = useState('');
 
   useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        setLoading(true);
+        const config = await getLLMConfig();
+        form.setFieldsValue({
+          base_url: config.base_url,
+          model: config.model,
+          api_key: '',
+        });
+        setCurrentMaskedKey(config.api_key_masked);
+      } catch {
+        message.error('加载配置失败');
+      } finally {
+        setLoading(false);
+      }
+    };
     loadConfig();
-  }, []);
-
-  const loadConfig = async () => {
-    try {
-      setLoading(true);
-      const config = await getLLMConfig();
-      form.setFieldsValue({
-        base_url: config.base_url,
-        model: config.model,
-        api_key: '',
-      });
-      setCurrentMaskedKey(config.api_key_masked);
-    } catch {
-      message.error('加载配置失败');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [form]);
 
   const handleSave = async () => {
     try {
