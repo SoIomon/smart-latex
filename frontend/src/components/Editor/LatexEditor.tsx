@@ -23,7 +23,7 @@ interface SelectionInfo {
   position: { top: number; left: number };
 }
 
-let programmaticScroll = false; // flag to suppress scroll-triggered forward sync during scrollIntoView
+const _scrollState = { programmatic: false }; // flag to suppress scroll-triggered forward sync during scrollIntoView
 
 // Simple diff: compute minimal changes between old and new text
 function computeChanges(oldText: string, newText: string): ChangeSpec[] {
@@ -199,13 +199,13 @@ export default function LatexEditor({ value, onChange, onForwardSync }: LatexEdi
     const lineCount = view.state.doc.lines;
     if (syncTargetLine < 1 || syncTargetLine > lineCount) return;
     const line = view.state.doc.line(syncTargetLine);
-    programmaticScroll = true;
+    _scrollState.programmatic = true;
     view.dispatch({
       effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
     });
     useEditorStore.getState().setSyncTargetLine(null);
     // Clear flag after scroll settles
-    setTimeout(() => { programmaticScroll = false; }, 300);
+    setTimeout(() => { _scrollState.programmatic = false; }, 300);
   }, [syncTargetLine, syncSource]);
 
   return (

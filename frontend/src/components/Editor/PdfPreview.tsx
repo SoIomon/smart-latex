@@ -16,7 +16,7 @@ interface PdfPreviewProps {
   onPageClick?: (page: number, x: number, y: number) => void;
 }
 
-export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPreviewProps) {
+export default function PdfPreview({ pdfUrl, onPageClick }: PdfPreviewProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [containerWidth, setContainerWidth] = useState<number>(600);
   const [loading, setLoading] = useState(true);
