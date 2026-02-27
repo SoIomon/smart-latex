@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { EditorView, drawSelection, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
-import { EditorState, type ChangeSpec } from '@codemirror/state';
+import { EditorView, Decoration, drawSelection, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
+import type { DecorationSet } from '@codemirror/view';
+import { EditorState, StateEffect, StateField, type ChangeSpec } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, foldGutter, indentOnInput, StreamLanguage } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
@@ -9,6 +10,41 @@ import { stex } from '@codemirror/legacy-modes/mode/stex';
 import SelectionToolbar from './SelectionToolbar';
 import { Tooltip } from 'antd';
 import { useEditorStore } from '../../stores/editorStore';
+
+// StateEffect to set/clear sync highlight lines from PDF selection
+const setSyncHighlightEffect = StateEffect.define<{ startLine: number; endLine: number } | null>();
+
+const syncHighlightDecoration = Decoration.line({ class: 'cm-syncHighlight' });
+
+const syncHighlightTheme = EditorView.baseTheme({
+  '.cm-syncHighlight': { backgroundColor: 'rgba(255, 213, 79, 0.25)' },
+});
+
+const syncHighlightField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decorations, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(setSyncHighlightEffect)) {
+        if (effect.value === null) {
+          return Decoration.none;
+        }
+        const { startLine, endLine } = effect.value;
+        const doc = tr.state.doc;
+        const decos: ReturnType<typeof syncHighlightDecoration.range>[] = [];
+        for (let l = startLine; l <= endLine && l <= doc.lines; l++) {
+          if (l < 1) continue;
+          const line = doc.line(l);
+          decos.push(syncHighlightDecoration.range(line.from));
+        }
+        return Decoration.set(decos, true);
+      }
+    }
+    return decorations;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 interface LatexEditorProps {
   value: string;
@@ -95,6 +131,8 @@ export default function LatexEditor({ value, onChange, onForwardSync }: LatexEdi
         autocompletion(),
         highlightSelectionMatches(),
         StreamLanguage.define(stex),
+        syncHighlightField,
+        syncHighlightTheme,
         keymap.of([
           ...defaultKeymap,
           ...historyKeymap,
@@ -120,28 +158,38 @@ export default function LatexEditor({ value, onChange, onForwardSync }: LatexEdi
           // Detect selection changes — only show toolbar for drag selections, not double-click
           if (update.selectionSet || update.docChanged) {
             const { from, to } = update.state.selection.main;
-            if (from !== to && !dblClickFiredRef.current) {
-              const selectedText = update.state.sliceDoc(from, to);
-              if (selectedText.trim().length > 0) {
-                const coords = update.view.coordsAtPos(from);
-                if (coords) {
-                  const top = Math.max(coords.top - 44, 4);
-                  const left = Math.max(Math.min(coords.left, window.innerWidth - 400), 10);
-                  setSelectionInfo({
-                    text: selectedText,
-                    from,
-                    to,
-                    position: { top, left },
-                  });
-                  setToolbarVisible(true);
+            if (from !== to) {
+              // Update editor highlight lines for PDF sync
+              const startLine = update.state.doc.lineAt(from).number;
+              const endLine = update.state.doc.lineAt(to).number;
+              useEditorStore.getState().setEditorHighlightLines({ startLine, endLine });
 
-                  if (!selectionHintShownRef.current) {
-                    selectionHintShownRef.current = true;
-                    setShowSelectionHint(true);
-                    setTimeout(() => setShowSelectionHint(false), 4000);
+              if (!dblClickFiredRef.current) {
+                const selectedText = update.state.sliceDoc(from, to);
+                if (selectedText.trim().length > 0) {
+                  const coords = update.view.coordsAtPos(from);
+                  if (coords) {
+                    const top = Math.max(coords.top - 44, 4);
+                    const left = Math.max(Math.min(coords.left, window.innerWidth - 400), 10);
+                    setSelectionInfo({
+                      text: selectedText,
+                      from,
+                      to,
+                      position: { top, left },
+                    });
+                    setToolbarVisible(true);
+
+                    if (!selectionHintShownRef.current) {
+                      selectionHintShownRef.current = true;
+                      setShowSelectionHint(true);
+                      setTimeout(() => setShowSelectionHint(false), 4000);
+                    }
                   }
                 }
               }
+            } else {
+              // Selection collapsed — clear highlight
+              useEditorStore.getState().setEditorHighlightLines(null);
             }
           }
         }),
@@ -190,6 +238,21 @@ export default function LatexEditor({ value, onChange, onForwardSync }: LatexEdi
       }
     }
   }, [value]);
+
+  // Subscribe to pdfHighlightLines — dispatch CM decoration
+  const pdfHighlightLines = useEditorStore((s) => s.pdfHighlightLines);
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({ effects: setSyncHighlightEffect.of(pdfHighlightLines) });
+  }, [pdfHighlightLines]);
+
+  // Clear editorHighlightLines on unmount
+  useEffect(() => {
+    return () => {
+      useEditorStore.getState().setEditorHighlightLines(null);
+    };
+  }, []);
 
   // Scroll editor to target line (inverse sync from PDF)
   const syncTargetLine = useEditorStore((s) => s.syncTargetLine);

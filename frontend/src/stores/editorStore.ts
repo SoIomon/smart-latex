@@ -4,6 +4,10 @@ import type { CompileResult } from '../types';
 
 export type EditorMode = 'edit' | 'preview' | 'split';
 export type SyncSource = 'editor' | 'pdf' | null;
+export interface LineRange {
+  startLine: number;
+  endLine: number;
+}
 
 interface EditorState {
   latexContent: string;
@@ -23,6 +27,10 @@ interface EditorState {
   lineMap: Record<string, { page: number; y: number }> | null;
   syncSource: SyncSource;
 
+  // Bidirectional highlight state
+  editorHighlightLines: LineRange | null;
+  pdfHighlightLines: LineRange | null;
+
   setLatexContent: (content: string) => void;
   setEditorMode: (mode: EditorMode) => void;
   setCompiling: (compiling: boolean) => void;
@@ -38,6 +46,10 @@ interface EditorState {
   setSyncTargetLine: (line: number | null) => void;
   setLineMap: (map: Record<string, { page: number; y: number }> | null) => void;
   setSyncSource: (source: SyncSource) => void;
+
+  // Bidirectional highlight actions
+  setEditorHighlightLines: (range: LineRange | null) => void;
+  setPdfHighlightLines: (range: LineRange | null) => void;
 }
 
 let syncSourceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -60,8 +72,12 @@ export const useEditorStore = create<EditorState>((set) => ({
   lineMap: null,
   syncSource: null,
 
+  // Bidirectional highlight state
+  editorHighlightLines: null,
+  pdfHighlightLines: null,
+
   setLatexContent: (content) => set({ latexContent: content }),
-  setEditorMode: (mode) => set({ editorMode: mode }),
+  setEditorMode: (mode) => set({ editorMode: mode, editorHighlightLines: null, pdfHighlightLines: null }),
   setCompiling: (compiling) => set({ compiling }),
   setCompileResult: (result) => set({ compileResult: result }),
   setPdfUrl: (url) => set({ pdfUrl: url }),
@@ -83,5 +99,17 @@ export const useEditorStore = create<EditorState>((set) => ({
         syncSourceTimer = null;
       }, 200);
     }
+  },
+
+  // Bidirectional highlight actions
+  setEditorHighlightLines: (range) => {
+    const cur = useEditorStore.getState().editorHighlightLines;
+    if (cur?.startLine === range?.startLine && cur?.endLine === range?.endLine) return;
+    set({ editorHighlightLines: range });
+  },
+  setPdfHighlightLines: (range) => {
+    const cur = useEditorStore.getState().pdfHighlightLines;
+    if (cur?.startLine === range?.startLine && cur?.endLine === range?.endLine) return;
+    set({ pdfHighlightLines: range });
   },
 }));
