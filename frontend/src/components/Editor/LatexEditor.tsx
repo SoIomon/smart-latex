@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
+import { EditorView, drawSelection, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
 import { EditorState, type ChangeSpec } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, foldGutter, indentOnInput, StreamLanguage } from '@codemirror/language';
@@ -85,6 +85,7 @@ export default function LatexEditor({ value, onChange, onForwardSync }: LatexEdi
       doc: value,
       extensions: [
         lineNumbers(),
+        drawSelection(),
         highlightActiveLine(),
         highlightActiveLineGutter(),
         history(),
