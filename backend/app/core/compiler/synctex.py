@@ -133,6 +133,40 @@ async def _run_synctex(args: list[str], cwd: str) -> str | None:
             return None
 
 
+_INPUT_PATH_CACHE: dict[str, str] = {}
+
+
+def _discover_input_path(tex_file: str, cwd: str) -> str | None:
+    """Discover the input path format stored in the synctex database.
+
+    On Windows, synctex may store paths with "./" prefix or backslashes.
+    Parse the .synctex.gz to find the actual Input: path that matches our file.
+    Returns the path string to use for forward sync, or None if not found.
+    """
+    import gzip
+    synctex_gz = Path(cwd) / (Path(tex_file).stem + ".synctex.gz")
+    if not synctex_gz.exists():
+        # Try pdf-based name
+        synctex_gz = Path(cwd) / "document.synctex.gz"
+    if not synctex_gz.exists():
+        return None
+    try:
+        with gzip.open(synctex_gz, "rt", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("Input:"):
+                    # Format: "Input:1:./document.tex" or "Input:1:document.tex"
+                    parts = line.strip().split(":", 2)
+                    if len(parts) >= 3:
+                        stored_path = parts[2]
+                        # Check if this matches our tex_file (basename comparison)
+                        if Path(stored_path).name == Path(tex_file).name:
+                            logger.info("synctex: discovered input path format %r for %r", stored_path, tex_file)
+                            return stored_path
+    except Exception as exc:
+        logger.debug("synctex: failed to parse synctex.gz: %s", exc)
+    return None
+
+
 async def forward_sync(
     line: int, column: int, tex_file: str, pdf_path: str, cwd: str
 ) -> ForwardSyncResult | None:
@@ -145,11 +179,39 @@ async def forward_sync(
         pdf_path: PDF filename relative to cwd (e.g. "document.pdf")
         cwd: working directory containing both files
     """
-    args = ["view", "-i", f"{line}:{column}:{tex_file}", "-o", pdf_path]
+    # Use cached input path if available, otherwise try original
+    cache_key = f"{cwd}:{tex_file}"
+    effective_path = _INPUT_PATH_CACHE.get(cache_key, tex_file)
+
+    args = ["view", "-i", f"{line}:{column}:{effective_path}", "-o", pdf_path]
     output = await _run_synctex(args, cwd)
-    if output is None:
-        return None
-    return _parse_forward_output(output)
+    if output is not None:
+        result = _parse_forward_output(output)
+        if result is not None:
+            return result
+
+    # First attempt failed; discover the correct path from synctex database
+    if cache_key not in _INPUT_PATH_CACHE:
+        discovered = await asyncio.to_thread(_discover_input_path, tex_file, cwd)
+        if discovered and discovered != effective_path:
+            _INPUT_PATH_CACHE[cache_key] = discovered
+            logger.info("synctex view: retrying with discovered path %r", discovered)
+            args2 = ["view", "-i", f"{line}:{column}:{discovered}", "-o", pdf_path]
+            output2 = await _run_synctex(args2, cwd)
+            if output2 is not None:
+                result2 = _parse_forward_output(output2)
+                if result2 is not None:
+                    return result2
+        else:
+            # Mark as tried so we don't re-discover every call
+            _INPUT_PATH_CACHE[cache_key] = effective_path
+            if output:
+                logger.debug(
+                    "synctex view: no parseable data, output=%r",
+                    output[:500],
+                )
+
+    return None
 
 
 async def inverse_sync(

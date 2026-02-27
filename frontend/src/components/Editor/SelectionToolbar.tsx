@@ -75,10 +75,8 @@ export default function SelectionToolbar({
           result += event.data;
         } else if (event.type === 'done') {
           // done event carries cleaned content (extract_latex applied);
-          // prefer it over raw streamed chunks
-          if (event.data) {
-            result = event.data;
-          }
+          // prefer it over raw streamed chunks (even if empty — deletion is valid)
+          result = event.data ?? result;
           break;
         } else if (event.type === 'error') {
           message.error(`AI 修改失败: ${event.data}`);
@@ -87,13 +85,10 @@ export default function SelectionToolbar({
         }
       }
 
-      if (result) {
-        onReplace(selectionFrom, selectionTo, result);
-        message.success('AI 修改完成');
-        onClose();
-      } else {
-        message.error('AI 返回内容为空，请重试');
-      }
+      // Empty result is valid — e.g., user asked to delete the selection
+      onReplace(selectionFrom, selectionTo, result);
+      message.success(result ? 'AI 修改完成' : 'AI 已删除选中内容');
+      onClose();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '请求失败';
       message.error(msg);
