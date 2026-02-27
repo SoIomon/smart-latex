@@ -11,6 +11,7 @@ from app.core.compiler.word_postprocessor import (
     _make_paragraph as make_paragraph,
     _make_page_break as make_page_break,
 )
+from app.core.fonts import get_cjk_fonts
 from . import FrontmatterBuilder
 
 
@@ -20,6 +21,8 @@ class GenericFrontmatter(FrontmatterBuilder):
     def build(self, doc: Document, metadata: WordExportMetadata) -> None:
         if not metadata.title:
             return
+
+        cjk = get_cjk_fonts()
 
         body = doc.element.body
         first_element = body[0] if len(body) > 0 else None
@@ -35,7 +38,7 @@ class GenericFrontmatter(FrontmatterBuilder):
         if metadata.title:
             elements.append(make_paragraph(
                 metadata.title,
-                font_name="Heiti SC",
+                font_name=cjk.heiti,
                 font_size=Pt(22),
                 bold=True,
                 alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
@@ -46,7 +49,7 @@ class GenericFrontmatter(FrontmatterBuilder):
         if metadata.author:
             elements.append(make_paragraph(
                 metadata.author,
-                font_name="STSong",
+                font_name=cjk.songti,
                 font_size=Pt(16),
                 alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
             ))
@@ -55,7 +58,7 @@ class GenericFrontmatter(FrontmatterBuilder):
         if metadata.institute:
             elements.append(make_paragraph(
                 metadata.institute,
-                font_name="STSong",
+                font_name=cjk.songti,
                 font_size=Pt(14),
                 alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
             ))
@@ -65,7 +68,7 @@ class GenericFrontmatter(FrontmatterBuilder):
             date_text = metadata.date or metadata.report_date
             elements.append(make_paragraph(
                 date_text,
-                font_name="STSong",
+                font_name=cjk.songti,
                 font_size=Pt(14),
                 alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
             ))

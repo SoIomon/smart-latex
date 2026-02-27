@@ -681,7 +681,11 @@ def _fill_cell(
     # Read fonts from profile
     profile = getattr(converter, "profile", None)
     body_latin = profile.fonts.body_latin if profile else "Times New Roman"
-    body_east_asian = profile.fonts.body_east_asian if profile else "STSong"
+    if profile:
+        body_east_asian = profile.fonts.body_east_asian
+    else:
+        from app.core.fonts import get_cjk_fonts
+        body_east_asian = get_cjk_fonts().songti
 
     # Convert tokens to text with formatting
     tokens = cell_data.tokens

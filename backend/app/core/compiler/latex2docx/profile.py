@@ -55,19 +55,36 @@ class NumberingConfig:
 
 @dataclass
 class FontsConfig:
-    """Font assignments for body, headings, captions, monospace, and CJK."""
+    """Font assignments for body, headings, captions, monospace, and CJK.
+
+    Default values are ``None``; ``__post_init__`` fills them from the
+    current ``CJK_FONTSET`` so that the profile automatically adapts to
+    the deployment platform.
+    """
     body_latin: str = "Times New Roman"
-    body_east_asian: str | None = "STSong"
+    body_east_asian: str | None = None
     heading_latin: str = "Times New Roman"
-    heading_east_asian: str | None = "Heiti SC"
-    caption_east_asian: str | None = "Heiti SC"
+    heading_east_asian: str | None = None
+    caption_east_asian: str | None = None
     monospace: str = "Courier New"
-    cjk_font_commands: dict[str, str] = dc_field(default_factory=lambda: {
-        "heiti": "Heiti SC",
-        "songti": "STSong",
-        "kaiti": "Kaiti SC",
-        "fangsong": "STFangsong",
-    })
+    cjk_font_commands: dict[str, str] | None = None
+
+    def __post_init__(self):
+        from app.core.fonts import get_cjk_fonts
+        cjk = get_cjk_fonts()
+        if self.body_east_asian is None:
+            self.body_east_asian = cjk.songti
+        if self.heading_east_asian is None:
+            self.heading_east_asian = cjk.heiti
+        if self.caption_east_asian is None:
+            self.caption_east_asian = cjk.heiti
+        if self.cjk_font_commands is None:
+            self.cjk_font_commands = {
+                "heiti": cjk.heiti,
+                "songti": cjk.songti,
+                "kaiti": cjk.kaiti,
+                "fangsong": cjk.fangsong,
+            }
 
 
 @dataclass
@@ -127,7 +144,7 @@ class PageHeadersConfig:
     ``body_page_format``: page number format for body sections.
     """
     enable_styleref: bool = True
-    header_font: str = "STSong"
+    header_font: str = ""  # filled by __post_init__
     header_font_size_pt: float = 10.5
     header_rule_pt: float = 0.8
     chapter_pattern: str = r"第\s*\d+\s*章"
@@ -148,6 +165,11 @@ class PageHeadersConfig:
     no_header_sections: list[int] = dc_field(default_factory=list)
     styleref_start_section: int = 6
 
+    def __post_init__(self):
+        if not self.header_font:
+            from app.core.fonts import get_cjk_fonts
+            self.header_font = get_cjk_fonts().songti
+
 
 # -- Frontmatter element / section configs --
 
@@ -159,7 +181,7 @@ class FrontmatterElementConfig:
     content: str = ""                # text content (may include {field} placeholders)
     field: str = ""                  # metadata field name to use as content
     source: str = ""                 # e.g. "school_logo" for logo element
-    font: str = "STSong"
+    font: str = ""                   # filled by __post_init__
     size_pt: float = 12
     bold: bool = False
     align: str = "left"              # left | center | right
@@ -167,6 +189,11 @@ class FrontmatterElementConfig:
     rows: list[list[str]] = dc_field(default_factory=list)  # for info_table / boilerplate
     space_before_pt: float | None = None
     condition: str = ""              # metadata field that must be truthy
+
+    def __post_init__(self):
+        if not self.font:
+            from app.core.fonts import get_cjk_fonts
+            self.font = get_cjk_fonts().songti
 
 
 @dataclass
@@ -192,7 +219,12 @@ class AutoTocConfig:
     """Auto TOC insertion configuration."""
     insert_before_first_chapter: bool = True
     heading_text: str = "目  录"
-    heading_font: str = "Heiti SC"
+    heading_font: str = ""  # filled by __post_init__
+
+    def __post_init__(self):
+        if not self.heading_font:
+            from app.core.fonts import get_cjk_fonts
+            self.heading_font = get_cjk_fonts().heiti
 
 
 @dataclass
@@ -408,15 +440,25 @@ def _build_numbering(data: dict) -> NumberingConfig:
 
 
 def _build_fonts(data: dict) -> FontsConfig:
+    from app.core.fonts import resolve_cjk_font_name
     defaults = FontsConfig()
+
+    def _resolve(key: str, default):
+        val = data.get(key, default)
+        return resolve_cjk_font_name(val) if isinstance(val, str) else val
+
+    cjk_cmds = data.get("cjk_font_commands")
+    if cjk_cmds is not None:
+        cjk_cmds = {k: resolve_cjk_font_name(v) for k, v in cjk_cmds.items()}
+
     return FontsConfig(
         body_latin=data.get("body_latin", defaults.body_latin),
-        body_east_asian=data.get("body_east_asian", defaults.body_east_asian),
+        body_east_asian=_resolve("body_east_asian", defaults.body_east_asian),
         heading_latin=data.get("heading_latin", defaults.heading_latin),
-        heading_east_asian=data.get("heading_east_asian", defaults.heading_east_asian),
-        caption_east_asian=data.get("caption_east_asian", defaults.caption_east_asian),
+        heading_east_asian=_resolve("heading_east_asian", defaults.heading_east_asian),
+        caption_east_asian=_resolve("caption_east_asian", defaults.caption_east_asian),
         monospace=data.get("monospace", defaults.monospace),
-        cjk_font_commands=data.get("cjk_font_commands", defaults.cjk_font_commands),
+        cjk_font_commands=cjk_cmds,
     )
 
 
@@ -449,10 +491,14 @@ def _build_styles(data: dict) -> StylesConfig:
 
 
 def _build_page_headers(data: dict) -> PageHeadersConfig:
+    from app.core.fonts import resolve_cjk_font_name
     defaults = PageHeadersConfig()
+    header_font = data.get("header_font", "")
+    if header_font:
+        header_font = resolve_cjk_font_name(header_font)
     return PageHeadersConfig(
         enable_styleref=data.get("enable_styleref", defaults.enable_styleref),
-        header_font=data.get("header_font", defaults.header_font),
+        header_font=header_font,
         header_font_size_pt=data.get("header_font_size_pt", defaults.header_font_size_pt),
         header_rule_pt=data.get("header_rule_pt", defaults.header_rule_pt),
         chapter_pattern=data.get("chapter_pattern", defaults.chapter_pattern),
@@ -470,12 +516,16 @@ def _build_page_headers(data: dict) -> PageHeadersConfig:
 
 
 def _build_frontmatter_element(data: dict) -> FrontmatterElementConfig:
+    from app.core.fonts import resolve_cjk_font_name
+    font_val = data.get("font", "")
+    if font_val:
+        font_val = resolve_cjk_font_name(font_val)
     return FrontmatterElementConfig(
         type=data.get("type", "text"),
         content=data.get("content", ""),
         field=data.get("field", ""),
         source=data.get("source", ""),
-        font=data.get("font", "STSong"),
+        font=font_val,
         size_pt=data.get("size_pt", 12),
         bold=data.get("bold", False),
         align=data.get("align", "left"),
@@ -506,11 +556,15 @@ def _build_body_section_break(data: dict) -> BodySectionBreakConfig:
 
 
 def _build_auto_toc(data: dict) -> AutoTocConfig:
+    from app.core.fonts import resolve_cjk_font_name
     defaults = AutoTocConfig()
+    heading_font = data.get("heading_font", "")
+    if heading_font:
+        heading_font = resolve_cjk_font_name(heading_font)
     return AutoTocConfig(
         insert_before_first_chapter=data.get("insert_before_first_chapter", defaults.insert_before_first_chapter),
         heading_text=data.get("heading_text", defaults.heading_text),
-        heading_font=data.get("heading_font", defaults.heading_font),
+        heading_font=heading_font,
     )
 
 

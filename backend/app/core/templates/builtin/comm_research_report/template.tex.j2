@@ -31,13 +31,13 @@
 % 字体配置（XeLaTeX）
 % ---------------------------------------------------------------------------
 \setmainfont{Times New Roman}
-\setCJKmainfont[BoldFont=Heiti SC]{STSong}
-\setCJKsansfont{Heiti SC}
-\setCJKmonofont{STSong}
-\newCJKfontfamily\heiti{Heiti SC}
-\newCJKfontfamily\songti{STSong}
-\newCJKfontfamily\fangsong{STSong}
-\newCJKfontfamily\kaiti{STSong}
+\setCJKmainfont[BoldFont=<< cjk_heiti | default('Heiti SC') >>]{<< cjk_songti | default('STSong') >>}
+\setCJKsansfont{<< cjk_heiti | default('Heiti SC') >>}
+\setCJKmonofont{<< cjk_songti | default('STSong') >>}
+\newCJKfontfamily\heiti{<< cjk_heiti | default('Heiti SC') >>}
+\newCJKfontfamily\songti{<< cjk_songti | default('STSong') >>}
+\newCJKfontfamily\fangsong{<< cjk_fangsong | default('STFangsong') >>}
+\newCJKfontfamily\kaiti{<< cjk_kaiti | default('Kaiti SC') >>}
 
 % ---------------------------------------------------------------------------
 % 超链接设置（去除彩色边框）

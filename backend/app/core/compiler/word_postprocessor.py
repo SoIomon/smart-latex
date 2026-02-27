@@ -17,6 +17,7 @@ from docx.oxml.ns import qn
 from docx.shared import Pt, Cm, RGBColor, Emu
 
 from app.core.compiler.word_preprocessor import WordExportMetadata
+from app.core.fonts import get_cjk_fonts
 
 logger = logging.getLogger(__name__)
 
@@ -286,8 +287,9 @@ def _rebuild_cover_page(doc: Document, metadata: WordExportMetadata) -> None:
     if metadata.classification:
         meta_lines.append(f"密级: {metadata.classification}")
 
+    _cjk = get_cjk_fonts()
     for line in meta_lines:
-        p = _make_paragraph(line, font_name="Heiti SC", font_size=Pt(10.5))
+        p = _make_paragraph(line, font_name=_cjk.heiti, font_size=Pt(10.5))
         cover_elements.append(p)
 
     # ── Spacer ──────────────────────────────────────────────────────────
@@ -297,7 +299,7 @@ def _rebuild_cover_page(doc: Document, metadata: WordExportMetadata) -> None:
     if metadata.title:
         p = _make_paragraph(
             metadata.title,
-            font_name="Heiti SC",
+            font_name=_cjk.heiti,
             font_size=Pt(22),
             bold=True,
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
@@ -325,7 +327,7 @@ def _rebuild_cover_page(doc: Document, metadata: WordExportMetadata) -> None:
     if metadata.institute:
         p = _make_paragraph(
             metadata.institute,
-            font_name="Heiti SC",
+            font_name=_cjk.heiti,
             font_size=Pt(18),
             bold=True,
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
@@ -335,7 +337,7 @@ def _rebuild_cover_page(doc: Document, metadata: WordExportMetadata) -> None:
     if metadata.report_date:
         p = _make_paragraph(
             metadata.report_date,
-            font_name="Heiti SC",
+            font_name=_cjk.heiti,
             font_size=Pt(16),
             bold=True,
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
@@ -358,7 +360,7 @@ def _rebuild_cover_page(doc: Document, metadata: WordExportMetadata) -> None:
 
 def _make_paragraph(
     text: str,
-    font_name: str = "STSong",
+    font_name: str = "",
     font_size=Pt(12),
     bold: bool = False,
     alignment=None,
@@ -369,6 +371,8 @@ def _make_paragraph(
 
     *space_before* / *space_after*: vertical spacing in Pt (e.g. ``Pt(50)``).
     """
+    if not font_name:
+        font_name = get_cjk_fonts().songti
     p = OxmlElement("w:p")
 
     need_pPr = alignment is not None or space_before is not None or space_after is not None
@@ -608,7 +612,7 @@ def _make_approval_table(doc: Document, rows: list[tuple[str, str, str]]) -> Oxm
     tbl.append(tblPr)
 
     # Header row
-    header_row = _make_table_row(["项目", "人员", "日期"], bold=True, font_name="Heiti SC")
+    header_row = _make_table_row(["项目", "人员", "日期"], bold=True, font_name=get_cjk_fonts().heiti)
     tbl.append(header_row)
 
     # Data rows
@@ -620,9 +624,11 @@ def _make_approval_table(doc: Document, rows: list[tuple[str, str, str]]) -> Oxm
 
 
 def _make_table_row(
-    cells: list[str], bold: bool = False, font_name: str = "STSong"
+    cells: list[str], bold: bool = False, font_name: str = ""
 ) -> OxmlElement:
     """Create a w:tr element with the given cell texts."""
+    if not font_name:
+        font_name = get_cjk_fonts().songti
     tr = OxmlElement("w:tr")
     for cell_text in cells:
         tc = OxmlElement("w:tc")
@@ -757,7 +763,7 @@ def _make_revision_table(records: list[dict]) -> OxmlElement:
     header = _make_table_row(
         ["版本", "日期", "更改摘要", "修改章节", "备注"],
         bold=True,
-        font_name="Heiti SC",
+        font_name=get_cjk_fonts().heiti,
     )
     tbl.append(header)
 
@@ -882,6 +888,7 @@ def _make_list_field_paragraph(kind: str = "figure",
 
 def _make_info_table(rows: list[tuple[str, str]]) -> OxmlElement:
     """Build a 2-column borderless info table (label: value with underline)."""
+    _cjk_info = get_cjk_fonts()
     tbl = OxmlElement("w:tbl")
 
     # Table properties — no borders, centered
@@ -933,7 +940,7 @@ def _make_info_table(rows: list[tuple[str, str]]) -> OxmlElement:
         tc_label.append(tcPr_label)
 
         p_label = _make_paragraph(
-            f"{label}：", font_name="STSong", font_size=Pt(14),
+            f"{label}：", font_name=_cjk_info.songti, font_size=Pt(14),
             alignment=WD_PARAGRAPH_ALIGNMENT.RIGHT,
         )
         # Zero spacing on label paragraph too
@@ -983,7 +990,7 @@ def _make_info_table(rows: list[tuple[str, str]]) -> OxmlElement:
 
         tc_val.append(tcPr_val)
         p_val = _make_paragraph(
-            value, font_name="STSong", font_size=Pt(14),
+            value, font_name=_cjk_info.songti, font_size=Pt(14),
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
         )
         # Remove inherited spacing so text sits tight against the border
@@ -1189,7 +1196,7 @@ def _fix_table_widths(doc: Document) -> None:
 
 
 def _set_static_header(section, text: str,
-                       font_name: str = "STSong",
+                       font_name: str = "",
                        font_size_pt: float = 10.5,
                        even_page: bool = False) -> None:
     """Set a centered static text header on *section*.
@@ -1197,6 +1204,8 @@ def _set_static_header(section, text: str,
     If *even_page* is True, sets the even-page header instead of the
     default (odd-page) header.
     """
+    if not font_name:
+        font_name = get_cjk_fonts().songti
     header = section.even_page_header if even_page else section.header
     header.is_linked_to_previous = False
     for p in header.paragraphs:
@@ -1232,13 +1241,15 @@ def _set_static_header(section, text: str,
 
 
 def _set_styleref_header(section,
-                         font_name: str = "STSong",
+                         font_name: str = "",
                          font_size_pt: float = 10.5) -> None:
     """Set a header with STYLEREF field that displays the current Heading 1.
 
     Each fldChar (begin/separate/end) must be in its own ``<w:r>`` element
     for Word to evaluate the field correctly.
     """
+    if not font_name:
+        font_name = get_cjk_fonts().songti
     header = section.header
     header.is_linked_to_previous = False
     for p in header.paragraphs:

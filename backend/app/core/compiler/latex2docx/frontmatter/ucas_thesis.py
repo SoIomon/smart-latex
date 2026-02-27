@@ -21,6 +21,7 @@ from app.core.compiler.word_postprocessor import (
     _set_styleref_header as set_styleref_header,
     _add_page_numbers as add_page_numbers,
 )
+from app.core.fonts import get_cjk_fonts
 from . import FrontmatterBuilder, register_builder
 
 
@@ -39,6 +40,8 @@ class UcasThesisFrontmatter(FrontmatterBuilder):
 
     def _build_frontmatter(self, doc: Document, metadata: WordExportMetadata):
         """Insert all front-matter at the beginning."""
+        cjk = get_cjk_fonts()
+
         body = doc.element.body
         first_element = body[0] if len(body) > 0 else None
 
@@ -53,7 +56,7 @@ class UcasThesisFrontmatter(FrontmatterBuilder):
         degree_word = metadata.degree or "硕士"
         elements.append(make_paragraph(
             f"{degree_word}学位论文",
-            font_name="Heiti SC", font_size=Pt(28), bold=True,
+            font_name=cjk.heiti, font_size=Pt(28), bold=True,
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
         ))
         elements.append(make_paragraph(""))
@@ -62,7 +65,7 @@ class UcasThesisFrontmatter(FrontmatterBuilder):
         if metadata.title:
             elements.append(make_paragraph(
                 metadata.title,
-                font_name="Heiti SC", font_size=Pt(16), bold=True,
+                font_name=cjk.heiti, font_size=Pt(16), bold=True,
                 alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
             ))
         elements.append(make_paragraph(""))
@@ -81,7 +84,7 @@ class UcasThesisFrontmatter(FrontmatterBuilder):
         if metadata.date:
             elements.append(make_paragraph(
                 metadata.date,
-                font_name="STSong", font_size=Pt(12),
+                font_name=cjk.songti, font_size=Pt(12),
                 alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
             ))
 
@@ -152,12 +155,12 @@ class UcasThesisFrontmatter(FrontmatterBuilder):
         # 3. Originality declaration
         elements.append(make_paragraph(
             "中国科学院大学",
-            font_name="Heiti SC", font_size=Pt(14), bold=True,
+            font_name=cjk.heiti, font_size=Pt(14), bold=True,
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
         ))
         elements.append(make_paragraph(
             "学位论文原创性声明",
-            font_name="Heiti SC", font_size=Pt(14), bold=True,
+            font_name=cjk.heiti, font_size=Pt(14), bold=True,
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
         ))
         elements.append(make_paragraph(""))
@@ -165,12 +168,12 @@ class UcasThesisFrontmatter(FrontmatterBuilder):
             "本人郑重声明：所呈交的学位论文是本人在导师的指导下独立进行研究工作所取得的成果。"
             "尽我所知，除文中已经注明引用的内容外，本论文不包含任何其他个人或集体已经发表或撰写过的研究成果。"
             "对论文所涉及的研究工作做出贡献的其他个人和集体，均已在文中以明确方式标明或致谢。",
-            font_name="STSong", font_size=Pt(10.5),
+            font_name=cjk.songti, font_size=Pt(10.5),
         ))
         elements.append(make_paragraph(""))
         elements.append(make_paragraph(
             "作者签名：____________    日    期：____________",
-            font_name="STSong", font_size=Pt(10.5),
+            font_name=cjk.songti, font_size=Pt(10.5),
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
         ))
         elements.append(make_paragraph(""))
@@ -180,12 +183,12 @@ class UcasThesisFrontmatter(FrontmatterBuilder):
         # 4. Authorization declaration
         elements.append(make_paragraph(
             "中国科学院大学",
-            font_name="Heiti SC", font_size=Pt(14), bold=True,
+            font_name=cjk.heiti, font_size=Pt(14), bold=True,
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
         ))
         elements.append(make_paragraph(
             "学位论文授权使用声明",
-            font_name="Heiti SC", font_size=Pt(14), bold=True,
+            font_name=cjk.heiti, font_size=Pt(14), bold=True,
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
         ))
         elements.append(make_paragraph(""))
@@ -193,22 +196,22 @@ class UcasThesisFrontmatter(FrontmatterBuilder):
             "本人完全了解并同意遵守中国科学院有关保存和使用学位论文的规定，即中国科学院有权保留送交学位论文的副本，"
             "允许该论文被查阅，可以按照学术研究公开原则和保护知识产权的原则公布该论文的全部或部分内容，"
             "可以采用影印、缩印或其他复制手段保存、汇编本学位论文。",
-            font_name="STSong", font_size=Pt(10.5),
+            font_name=cjk.songti, font_size=Pt(10.5),
         ))
         elements.append(make_paragraph(""))
         elements.append(make_paragraph(
             "涉密及延迟公开的学位论文在解密或延迟期后适用本声明。",
-            font_name="STSong", font_size=Pt(10.5),
+            font_name=cjk.songti, font_size=Pt(10.5),
         ))
         elements.append(make_paragraph(""))
         elements.append(make_paragraph(
             "作者签名：__________    导师签名：__________",
-            font_name="STSong", font_size=Pt(10.5),
+            font_name=cjk.songti, font_size=Pt(10.5),
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
         ))
         elements.append(make_paragraph(
             "日    期：__________    日    期：__________",
-            font_name="STSong", font_size=Pt(10.5),
+            font_name=cjk.songti, font_size=Pt(10.5),
             alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
         ))
         elements.append(make_section_break("oddPage"))
@@ -269,11 +272,12 @@ class UcasThesisFrontmatter(FrontmatterBuilder):
             # No TOC exists — insert TOC + section breaks before body
             try:
                 idx = list(body).index(first_chapter_elem)
+                _cjk_toc = get_cjk_fonts()
                 toc_elems = [
                     make_section_break("oddPage"),
                     make_paragraph(
                         "目  录",
-                        font_name="Heiti SC", font_size=Pt(16), bold=True,
+                        font_name=_cjk_toc.heiti, font_size=Pt(16), bold=True,
                         alignment=WD_PARAGRAPH_ALIGNMENT.CENTER,
                     ),
                     make_paragraph(""),

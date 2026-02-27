@@ -152,6 +152,14 @@ def _build_preamble_from_template(outline: dict, template_id: str) -> str:
             variables[var_name] = val
     if "title" not in variables:
         variables["title"] = "综合文档"
+    # Inject CJK font variables for cross-platform support
+    from app.core.fonts import get_cjk_fonts
+    cjk = get_cjk_fonts()
+    variables.setdefault("cjk_songti", cjk.songti)
+    variables.setdefault("cjk_heiti", cjk.heiti)
+    variables.setdefault("cjk_kaiti", cjk.kaiti)
+    variables.setdefault("cjk_fangsong", cjk.fangsong)
+
     # Pass through any extra outline keys (only non-empty)
     for k, v in outline.items():
         if k not in variables and v:
