@@ -328,7 +328,20 @@ async def compile_latex(
     output_dir.mkdir(parents=True, exist_ok=True)
     if support_dirs:
         _copy_support_dirs(support_dirs, output_dir)
+    original_content = latex_content
     latex_content = _fix_common_latex_issues(latex_content)
+
+    # Calculate line offset introduced by _fix_common_latex_issues
+    # (primarily _inject_missing_packages which inserts lines before \begin{document})
+    line_offset = 0
+    if r'\begin{document}' in original_content and r'\begin{document}' in latex_content:
+        orig_line = original_content[: original_content.index(r'\begin{document}')].count('\n')
+        comp_line = latex_content[: latex_content.index(r'\begin{document}')].count('\n')
+        line_offset = comp_line - orig_line
+    # Persist offset so synctex API can correct line numbers
+    (output_dir / "line_offset.txt").write_text(str(line_offset), encoding="utf-8")
+    logger.info("compile_latex: line_offset=%d", line_offset)
+
     tex_path = output_dir / "document.tex"
     tex_path.write_text(latex_content, encoding="utf-8")
 

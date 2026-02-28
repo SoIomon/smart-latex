@@ -29,6 +29,8 @@ def cleanup_sandbox(sandbox_dir: Path):
             # .synctex.gz has double extension; Path.suffix only returns .gz
             if f.name.endswith(".synctex.gz"):
                 continue
+            if f.name == "line_offset.txt":
+                continue
             if f.suffix not in _KEEP_SUFFIXES:
                 f.unlink()
         except OSError as e:

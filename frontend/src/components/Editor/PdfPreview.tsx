@@ -142,7 +142,11 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
 
   // Tier 2: forwardSync API — exact highlight (debounced, multi-point sampled, cached)
   const forwardSyncCache = useRef(new Map<number, { page: number; y: number }>());
-  const [exactRegions, setExactRegions] = useState<PdfRegion[] | null>(null);
+  const [exactState, setExactState] = useState<{
+    regions: PdfRegion[];
+    startLine: number;
+    endLine: number;
+  } | null>(null);
 
   // Clear forwardSync cache when lineMap changes (new compilation)
   useEffect(() => {
@@ -151,12 +155,9 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
 
   useEffect(() => {
     if (!editorHighlightLines || !projectId) {
-      setExactRegions(null);
+      setExactState(null);
       return;
     }
-
-    // Clear stale exact regions so approx shows immediately during debounce
-    setExactRegions(null);
 
     let cancelled = false;
     const timer = setTimeout(async () => {
@@ -234,7 +235,7 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
         regions.sort((a, b) => a.page - b.page);
       }
 
-      setExactRegions(regions);
+      setExactState({ regions, startLine, endLine });
     }, 150);
 
     return () => {
@@ -243,7 +244,14 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
     };
   }, [editorHighlightLines, projectId]);
 
-  // Final highlight: prefer exact regions, fall back to lineMap approximation
+  // Final highlight: prefer exact regions only if they match current selection
+  const exactRegions =
+    exactState &&
+    editorHighlightLines &&
+    exactState.startLine === editorHighlightLines.startLine &&
+    exactState.endLine === editorHighlightLines.endLine
+      ? exactState.regions
+      : null;
   const highlightRegions = exactRegions ?? approxRegions;
 
   // Listen for PDF text selection (selectionchange) -> inverse sync -> editor highlight

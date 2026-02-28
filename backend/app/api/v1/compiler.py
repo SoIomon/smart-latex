@@ -310,6 +310,17 @@ def _should_rebuild_frontmatter(latex_content: str, _metadata) -> bool:
     )
 
 
+def _read_line_offset(build_dir: Path) -> int:
+    """Read the line offset written by compile_latex (preprocessing may shift lines)."""
+    offset_file = build_dir / "line_offset.txt"
+    if offset_file.exists():
+        try:
+            return int(offset_file.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            pass
+    return 0
+
+
 @router.get("/projects/{project_id}/synctex/forward")
 async def synctex_forward(
     line: int,
@@ -322,11 +333,14 @@ async def synctex_forward(
     logger.info("synctex forward: line=%d col=%d synctex.gz_exists=%s", line, column, synctex_gz.exists())
     if not synctex_gz.exists():
         raise HTTPException(status_code=404, detail="SyncTeX data not found. Compile first.")
-    result = await forward_sync(line, column, "document.tex", "document.pdf", str(build_dir))
+    # Correct for line offset from preprocessing
+    offset = _read_line_offset(build_dir)
+    adjusted_line = line + offset
+    result = await forward_sync(adjusted_line, column, "document.tex", "document.pdf", str(build_dir))
     if result is None:
-        logger.warning("synctex forward: no result for line=%d col=%d", line, column)
+        logger.warning("synctex forward: no result for line=%d (adjusted=%d) col=%d", line, adjusted_line, column)
         raise HTTPException(status_code=404, detail="No sync data for this position.")
-    logger.info("synctex forward: line=%d → page=%d y=%.1f", line, result.page, result.y)
+    logger.info("synctex forward: line=%d (adjusted=%d) → page=%d y=%.1f", line, adjusted_line, result.page, result.y)
     return {"page": result.page, "x": result.x, "y": result.y, "width": result.width, "height": result.height}
 
 
@@ -347,8 +361,11 @@ async def synctex_inverse(
     if result is None:
         logger.warning("synctex inverse: no result for page=%d x=%.1f y=%.1f", page, x, y)
         raise HTTPException(status_code=404, detail="No sync data for this position.")
-    logger.info("synctex inverse: page=%d → line=%d", page, result.line)
-    return {"filename": result.filename, "line": result.line, "column": result.column}
+    # Correct for line offset from preprocessing
+    offset = _read_line_offset(build_dir)
+    corrected_line = max(1, result.line - offset)
+    logger.info("synctex inverse: page=%d → line=%d (corrected=%d)", page, result.line, corrected_line)
+    return {"filename": result.filename, "line": corrected_line, "column": result.column}
 
 
 @router.get("/projects/{project_id}/synctex/linemap")
@@ -364,7 +381,16 @@ async def synctex_linemap(
     if not tex_path.exists():
         raise HTTPException(status_code=404, detail="Source file not found.")
     total_lines = len(tex_path.read_text(encoding="utf-8").splitlines())
+    offset = _read_line_offset(build_dir)
     line_map = await build_line_map("document.tex", "document.pdf", str(build_dir), total_lines, step=2)
+    # Correct line numbers in the map: synctex lines → editor lines
+    if offset != 0:
+        corrected_map = {}
+        for key, val in line_map.items():
+            corrected_key = str(max(1, int(key) - offset))
+            corrected_map[corrected_key] = val
+        line_map = corrected_map
+        total_lines = max(1, total_lines - offset)
     return {"line_map": line_map, "total_lines": total_lines}
 
 
