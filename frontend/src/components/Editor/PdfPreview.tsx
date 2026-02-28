@@ -91,11 +91,9 @@ function linesToPdfRegionsFromSorted(
     yEnd: PDF_PAGE_HEIGHT,
   });
 
-  // Intermediate full pages
+  // Intermediate full pages (include all, even figure/table-only pages)
   for (let p = startPos.page + 1; p < endPos.page; p++) {
-    if (entries.some((e) => e.page === p)) {
-      regions.push({ page: p, yStart: 0, yEnd: PDF_PAGE_HEIGHT });
-    }
+    regions.push({ page: p, yStart: 0, yEnd: PDF_PAGE_HEIGHT });
   }
 
   // Last page: from top to end position
@@ -142,7 +140,7 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
     return linesToPdfRegionsFromSorted(sortedEntries, editorHighlightLines.startLine, editorHighlightLines.endLine);
   }, [editorHighlightLines, sortedEntries]);
 
-  // Tier 2: forwardSync API — exact highlight (debounced, cached)
+  // Tier 2: forwardSync API — exact highlight (debounced, multi-point sampled, cached)
   const forwardSyncCache = useRef(new Map<number, { page: number; y: number }>());
   const [exactRegions, setExactRegions] = useState<PdfRegion[] | null>(null);
 
@@ -166,65 +164,77 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
       const { startLine, endLine } = editorHighlightLines;
       const cache = forwardSyncCache.current;
 
-      try {
-        // Fetch start/end positions (cache-first)
-        let startPos = cache.get(startLine);
-        let endPos = cache.get(endLine);
-
-        const fetches: Promise<void>[] = [];
-        if (!startPos) {
-          fetches.push(
-            forwardSync(projectId, startLine).then((r) => {
-              startPos = { page: r.page, y: r.y };
-              cache.set(startLine, startPos);
-            }),
-          );
+      // Build sample points: start, end, plus intermediate points for cross-page detection
+      const linesToQuery = new Set<number>([startLine, endLine]);
+      const range = endLine - startLine;
+      if (range > 5) {
+        const step = Math.max(1, Math.floor(range / 6));
+        for (let l = startLine + step; l < endLine; l += step) {
+          linesToQuery.add(l);
         }
-        if (!endPos && endLine !== startLine) {
-          fetches.push(
-            forwardSync(projectId, endLine).then((r) => {
-              endPos = { page: r.page, y: r.y };
-              cache.set(endLine, endPos);
-            }),
-          );
-        }
+      }
 
-        if (fetches.length > 0) await Promise.all(fetches);
-        if (cancelled) return;
+      // Query all sample points (cache-first, individual failures tolerated)
+      const results = new Map<number, { page: number; y: number }>();
+      for (const l of linesToQuery) {
+        const cached = cache.get(l);
+        if (cached) results.set(l, cached);
+      }
 
-        // Single line: both endpoints are the same
-        if (endLine === startLine) endPos = startPos;
-        if (!startPos || !endPos) return;
+      const uncached = [...linesToQuery].filter((l) => !results.has(l));
+      if (uncached.length > 0) {
+        await Promise.all(
+          uncached.map((l) =>
+            forwardSync(projectId, l)
+              .then((r) => {
+                const pos = { page: r.page, y: r.y };
+                cache.set(l, pos);
+                results.set(l, pos);
+              })
+              .catch(() => {}), // individual failure is OK
+          ),
+        );
+      }
+      if (cancelled || results.size === 0) return;
 
-        // Build exact regions
-        if (startPos.page === endPos.page) {
-          const yMin = Math.min(startPos.y, endPos.y);
-          const yMax = Math.max(startPos.y, endPos.y);
-          setExactRegions([{
-            page: startPos.page,
-            yStart: Math.max(0, yMin - LINE_HEIGHT_PT),
-            yEnd: yMax + LINE_HEIGHT_PT,
-          }]);
+      // Group results by page → {minY, maxY}
+      const pageYs = new Map<number, { min: number; max: number }>();
+      for (const pos of results.values()) {
+        const entry = pageYs.get(pos.page);
+        if (entry) {
+          entry.min = Math.min(entry.min, pos.y);
+          entry.max = Math.max(entry.max, pos.y);
         } else {
-          const regions: PdfRegion[] = [];
-          regions.push({
-            page: startPos.page,
-            yStart: Math.max(0, startPos.y - LINE_HEIGHT_PT),
-            yEnd: PDF_PAGE_HEIGHT,
-          });
-          for (let p = startPos.page + 1; p < endPos.page; p++) {
+          pageYs.set(pos.page, { min: pos.y, max: pos.y });
+        }
+      }
+
+      // Build regions from page groups
+      const pages = [...pageYs.keys()].sort((a, b) => a - b);
+      const regions: PdfRegion[] = [];
+      for (let i = 0; i < pages.length; i++) {
+        const p = pages[i];
+        const ys = pageYs.get(p)!;
+        const isFirst = i === 0;
+        const isLast = i === pages.length - 1;
+        regions.push({
+          page: p,
+          yStart: isFirst ? Math.max(0, ys.min - LINE_HEIGHT_PT) : 0,
+          yEnd: isLast ? ys.max + LINE_HEIGHT_PT : PDF_PAGE_HEIGHT,
+        });
+      }
+
+      // Fill intermediate pages that had no sample points (e.g., figure-only pages)
+      if (pages.length >= 2) {
+        for (let p = pages[0] + 1; p < pages[pages.length - 1]; p++) {
+          if (!pageYs.has(p)) {
             regions.push({ page: p, yStart: 0, yEnd: PDF_PAGE_HEIGHT });
           }
-          regions.push({
-            page: endPos.page,
-            yStart: 0,
-            yEnd: endPos.y + LINE_HEIGHT_PT,
-          });
-          setExactRegions(regions);
         }
-      } catch {
-        // forwardSync failed, keep using approximate regions
+        regions.sort((a, b) => a.page - b.page);
       }
+
+      setExactRegions(regions);
     }, 150);
 
     return () => {
