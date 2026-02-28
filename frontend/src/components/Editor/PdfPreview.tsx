@@ -4,7 +4,7 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { Empty, Spin } from 'antd';
 import { useEditorStore } from '../../stores/editorStore';
-import { inverseSync } from '../../api/synctex';
+import { forwardSync, inverseSync } from '../../api/synctex';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -136,11 +136,105 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
       .sort((a, b) => a.line - b.line);
   }, [lineMap]);
 
-  // Compute PDF highlight regions from editor selection
-  const highlightRegions = useMemo(() => {
+  // Tier 1: lineMap interpolation — instant approximate highlight
+  const approxRegions = useMemo(() => {
     if (!editorHighlightLines || sortedEntries.length === 0) return [];
     return linesToPdfRegionsFromSorted(sortedEntries, editorHighlightLines.startLine, editorHighlightLines.endLine);
   }, [editorHighlightLines, sortedEntries]);
+
+  // Tier 2: forwardSync API — exact highlight (debounced, cached)
+  const forwardSyncCache = useRef(new Map<number, { page: number; y: number }>());
+  const [exactRegions, setExactRegions] = useState<PdfRegion[] | null>(null);
+
+  // Clear forwardSync cache when lineMap changes (new compilation)
+  useEffect(() => {
+    forwardSyncCache.current.clear();
+  }, [lineMap]);
+
+  useEffect(() => {
+    if (!editorHighlightLines || !projectId) {
+      setExactRegions(null);
+      return;
+    }
+
+    // Clear stale exact regions so approx shows immediately during debounce
+    setExactRegions(null);
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (cancelled) return;
+      const { startLine, endLine } = editorHighlightLines;
+      const cache = forwardSyncCache.current;
+
+      try {
+        // Fetch start/end positions (cache-first)
+        let startPos = cache.get(startLine);
+        let endPos = cache.get(endLine);
+
+        const fetches: Promise<void>[] = [];
+        if (!startPos) {
+          fetches.push(
+            forwardSync(projectId, startLine).then((r) => {
+              startPos = { page: r.page, y: r.y };
+              cache.set(startLine, startPos);
+            }),
+          );
+        }
+        if (!endPos && endLine !== startLine) {
+          fetches.push(
+            forwardSync(projectId, endLine).then((r) => {
+              endPos = { page: r.page, y: r.y };
+              cache.set(endLine, endPos);
+            }),
+          );
+        }
+
+        if (fetches.length > 0) await Promise.all(fetches);
+        if (cancelled) return;
+
+        // Single line: both endpoints are the same
+        if (endLine === startLine) endPos = startPos;
+        if (!startPos || !endPos) return;
+
+        // Build exact regions
+        if (startPos.page === endPos.page) {
+          const yMin = Math.min(startPos.y, endPos.y);
+          const yMax = Math.max(startPos.y, endPos.y);
+          setExactRegions([{
+            page: startPos.page,
+            yStart: Math.max(0, yMin - LINE_HEIGHT_PT),
+            yEnd: yMax + LINE_HEIGHT_PT,
+          }]);
+        } else {
+          const regions: PdfRegion[] = [];
+          regions.push({
+            page: startPos.page,
+            yStart: Math.max(0, startPos.y - LINE_HEIGHT_PT),
+            yEnd: PDF_PAGE_HEIGHT,
+          });
+          for (let p = startPos.page + 1; p < endPos.page; p++) {
+            regions.push({ page: p, yStart: 0, yEnd: PDF_PAGE_HEIGHT });
+          }
+          regions.push({
+            page: endPos.page,
+            yStart: 0,
+            yEnd: endPos.y + LINE_HEIGHT_PT,
+          });
+          setExactRegions(regions);
+        }
+      } catch {
+        // forwardSync failed, keep using approximate regions
+      }
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [editorHighlightLines, projectId]);
+
+  // Final highlight: prefer exact regions, fall back to lineMap approximation
+  const highlightRegions = exactRegions ?? approxRegions;
 
   // Listen for PDF text selection (selectionchange) -> inverse sync -> editor highlight
   useEffect(() => {
