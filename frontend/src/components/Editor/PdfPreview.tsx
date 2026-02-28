@@ -27,6 +27,39 @@ const PDF_PAGE_WIDTH = 595; // A4 width in PDF points
 const PDF_PAGE_HEIGHT = 842; // A4 height in PDF points
 const LINE_HEIGHT_PT = 14; // approximate line height padding in PDF points
 
+// Interpolate a PDF position for a given source line number.
+// With lineMap step=5, this avoids snapping to the nearest mapped line
+// and instead computes a precise y-coordinate between two known points.
+function interpolatePosition(
+  entries: LineMapEntry[],
+  line: number,
+): { page: number; y: number } {
+  // Find bracketing entries: largest line ≤ target, smallest line ≥ target
+  let lowerIdx = 0;
+  for (let i = 0; i < entries.length; i++) {
+    if (entries[i].line <= line) lowerIdx = i;
+    else break;
+  }
+  let upperIdx = entries.length - 1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].line >= line) upperIdx = i;
+    else break;
+  }
+
+  const lower = entries[lowerIdx];
+  const upper = entries[upperIdx];
+
+  // Same entry or cross-page boundary: use nearest
+  if (lowerIdx === upperIdx || lower.page !== upper.page) {
+    const useLower = (line - lower.line) <= (upper.line - line);
+    return useLower ? { page: lower.page, y: lower.y } : { page: upper.page, y: upper.y };
+  }
+
+  // Interpolate between two entries on the same page
+  const t = (line - lower.line) / (upper.line - lower.line);
+  return { page: lower.page, y: lower.y + t * (upper.y - lower.y) };
+}
+
 function linesToPdfRegionsFromSorted(
   entries: LineMapEntry[],
   startLine: number,
@@ -34,47 +67,45 @@ function linesToPdfRegionsFromSorted(
 ): PdfRegion[] {
   if (entries.length === 0) return [];
 
-  // Find nearest entry <= startLine
-  let startIdx = 0;
-  for (let i = 0; i < entries.length; i++) {
-    if (entries[i].line <= startLine) startIdx = i;
-    else break;
+  const startPos = interpolatePosition(entries, startLine);
+  const endPos = interpolatePosition(entries, endLine);
+
+  // Same page — single region
+  if (startPos.page === endPos.page) {
+    const yMin = Math.min(startPos.y, endPos.y);
+    const yMax = Math.max(startPos.y, endPos.y);
+    return [{
+      page: startPos.page,
+      yStart: Math.max(0, yMin - LINE_HEIGHT_PT),
+      yEnd: yMax + LINE_HEIGHT_PT,
+    }];
   }
 
-  // Find nearest entry >= endLine
-  let endIdx = entries.length - 1;
-  for (let i = entries.length - 1; i >= 0; i--) {
-    if (entries[i].line >= endLine) endIdx = i;
-    else break;
-  }
-
-  // Ensure startIdx <= endIdx
-  if (startIdx > endIdx) {
-    const tmp = startIdx;
-    startIdx = endIdx;
-    endIdx = tmp;
-  }
-
-  // Collect entries in range and group by page
-  const pageGroups = new Map<number, number[]>();
-  for (let i = startIdx; i <= endIdx; i++) {
-    const e = entries[i];
-    if (!pageGroups.has(e.page)) pageGroups.set(e.page, []);
-    pageGroups.get(e.page)!.push(e.y);
-  }
-
+  // Cross-page selection
   const regions: PdfRegion[] = [];
-  for (const [page, ys] of pageGroups) {
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    regions.push({
-      page,
-      yStart: Math.max(0, minY - LINE_HEIGHT_PT),
-      yEnd: maxY + LINE_HEIGHT_PT,
-    });
+
+  // First page: from start position to page bottom
+  regions.push({
+    page: startPos.page,
+    yStart: Math.max(0, startPos.y - LINE_HEIGHT_PT),
+    yEnd: PDF_PAGE_HEIGHT,
+  });
+
+  // Intermediate full pages
+  for (let p = startPos.page + 1; p < endPos.page; p++) {
+    if (entries.some((e) => e.page === p)) {
+      regions.push({ page: p, yStart: 0, yEnd: PDF_PAGE_HEIGHT });
+    }
   }
 
-  return regions.sort((a, b) => a.page - b.page || a.yStart - b.yStart);
+  // Last page: from top to end position
+  regions.push({
+    page: endPos.page,
+    yStart: 0,
+    yEnd: endPos.y + LINE_HEIGHT_PT,
+  });
+
+  return regions;
 }
 
 interface PdfPreviewProps {
