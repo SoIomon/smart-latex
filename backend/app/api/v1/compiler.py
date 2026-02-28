@@ -364,7 +364,7 @@ async def synctex_linemap(
     if not tex_path.exists():
         raise HTTPException(status_code=404, detail="Source file not found.")
     total_lines = len(tex_path.read_text(encoding="utf-8").splitlines())
-    line_map = await build_line_map("document.tex", "document.pdf", str(build_dir), total_lines)
+    line_map = await build_line_map("document.tex", "document.pdf", str(build_dir), total_lines, step=2)
     return {"line_map": line_map, "total_lines": total_lines}
 
 
