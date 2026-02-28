@@ -10,6 +10,7 @@ import { stex } from '@codemirror/legacy-modes/mode/stex';
 import SelectionToolbar from './SelectionToolbar';
 import { Tooltip } from 'antd';
 import { useEditorStore } from '../../stores/editorStore';
+import { interpolatePosition, toSortedEntries } from './syncUtils';
 
 // StateEffect to set/clear sync highlight lines from PDF selection
 const setSyncHighlightEffect = StateEffect.define<{ startLine: number; endLine: number } | null>();
@@ -60,6 +61,7 @@ interface SelectionInfo {
 }
 
 const _scrollState = { programmatic: false }; // flag to suppress scroll-triggered forward sync during scrollIntoView
+const _docChangeState = { recently: false, timer: null as ReturnType<typeof setTimeout> | null }; // suppress scroll-follow during typing
 
 // Simple diff: compute minimal changes between old and new text
 function computeChanges(oldText: string, newText: string): ChangeSpec[] {
@@ -154,6 +156,10 @@ export default function LatexEditor({ value, onChange, onForwardSync }: LatexEdi
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             onChangeRef.current(update.state.doc.toString());
+            // Mark doc as recently changed to suppress scroll-follow during typing
+            _docChangeState.recently = true;
+            if (_docChangeState.timer) clearTimeout(_docChangeState.timer);
+            _docChangeState.timer = setTimeout(() => { _docChangeState.recently = false; }, 300);
           }
           // Detect selection changes — only show toolbar for drag selections, not double-click
           if (update.selectionSet || update.docChanged) {
@@ -190,6 +196,20 @@ export default function LatexEditor({ value, onChange, onForwardSync }: LatexEdi
             } else {
               // Selection collapsed — clear highlight
               useEditorStore.getState().setEditorHighlightLines(null);
+
+              // Auto-follow: cursor moved without typing → scroll PDF (instant)
+              if (update.selectionSet && !update.docChanged && !_scrollState.programmatic) {
+                const state = useEditorStore.getState();
+                if (state.autoFollow && state.lineMap) {
+                  const cursorLine = update.state.doc.lineAt(from).number;
+                  const entries = toSortedEntries(state.lineMap);
+                  if (entries.length > 0) {
+                    const pos = interpolatePosition(entries, cursorLine);
+                    state.setSyncSource('editor');
+                    state.setSyncTarget(pos.page, pos.y, false); // instant
+                  }
+                }
+              }
             }
           }
         }),
@@ -213,7 +233,33 @@ export default function LatexEditor({ value, onChange, onForwardSync }: LatexEdi
     viewRef.current = view;
     useEditorStore.getState().setEditorView(view);
 
+    // Editor scroll → PDF auto-follow (RAF-throttled)
+    let rafId: number | null = null;
+    let lastFollowLine = -1;
+    const scrollDOM = view.scrollDOM;
+    const handleEditorScroll = () => {
+      if (rafId !== null) return; // throttle to 1 per frame
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        if (_scrollState.programmatic || _docChangeState.recently) return;
+        const state = useEditorStore.getState();
+        if (!state.autoFollow || !state.lineMap || state.activePane !== 'editor') return;
+        const topBlock = view.lineBlockAtHeight(scrollDOM.scrollTop);
+        const topLine = view.state.doc.lineAt(topBlock.from).number;
+        if (topLine === lastFollowLine) return; // no change
+        lastFollowLine = topLine;
+        const entries = toSortedEntries(state.lineMap);
+        if (entries.length === 0) return;
+        const pos = interpolatePosition(entries, topLine);
+        state.setSyncSource('editor');
+        state.setSyncTarget(pos.page, pos.y, false); // instant scroll
+      });
+    };
+    scrollDOM.addEventListener('scroll', handleEditorScroll, { passive: true });
+
     return () => {
+      scrollDOM.removeEventListener('scroll', handleEditorScroll);
+      if (rafId !== null) cancelAnimationFrame(rafId);
       view.destroy();
       viewRef.current = null;
       useEditorStore.getState().setEditorView(null);
@@ -273,7 +319,14 @@ export default function LatexEditor({ value, onChange, onForwardSync }: LatexEdi
   }, [syncTargetLine, syncSource]);
 
   return (
-    <div style={{ height: '100%', width: '100%', overflow: 'hidden', position: 'relative' }}>
+    <div
+      style={{ height: '100%', width: '100%', overflow: 'hidden', position: 'relative' }}
+      onMouseEnter={() => useEditorStore.getState().setActivePane('editor')}
+      onMouseLeave={() => {
+        const s = useEditorStore.getState();
+        if (s.activePane === 'editor') s.setActivePane(null);
+      }}
+    >
       <div
         ref={containerRef}
         style={{ height: '100%', width: '100%', overflow: 'hidden' }}

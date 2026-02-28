@@ -31,6 +31,10 @@ interface EditorState {
   editorHighlightLines: LineRange | null;
   pdfHighlightLines: LineRange | null;
 
+  // Auto-follow state
+  autoFollow: boolean;
+  activePane: 'editor' | 'pdf' | null; // which pane the mouse is hovering over
+
   setLatexContent: (content: string) => void;
   setEditorMode: (mode: EditorMode) => void;
   setCompiling: (compiling: boolean) => void;
@@ -42,7 +46,8 @@ interface EditorState {
 
   // SyncTeX actions
   setEditorView: (view: EditorView | null) => void;
-  setSyncTarget: (page: number | null, y: number | null) => void;
+  setSyncTarget: (page: number | null, y: number | null, smooth?: boolean) => void;
+  syncTargetSmooth: boolean;
   setSyncTargetLine: (line: number | null) => void;
   setLineMap: (map: Record<string, { page: number; y: number }> | null) => void;
   setSyncSource: (source: SyncSource) => void;
@@ -50,6 +55,10 @@ interface EditorState {
   // Bidirectional highlight actions
   setEditorHighlightLines: (range: LineRange | null) => void;
   setPdfHighlightLines: (range: LineRange | null) => void;
+
+  // Auto-follow actions
+  setAutoFollow: (enabled: boolean) => void;
+  setActivePane: (pane: 'editor' | 'pdf' | null) => void;
 }
 
 let syncSourceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -68,6 +77,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   editorView: null,
   syncTargetPage: null,
   syncTargetY: null,
+  syncTargetSmooth: true,
   syncTargetLine: null,
   lineMap: null,
   syncSource: null,
@@ -75,6 +85,10 @@ export const useEditorStore = create<EditorState>((set) => ({
   // Bidirectional highlight state
   editorHighlightLines: null,
   pdfHighlightLines: null,
+
+  // Auto-follow state
+  autoFollow: true,
+  activePane: null,
 
   setLatexContent: (content) => set({ latexContent: content }),
   setEditorMode: (mode) => set({ editorMode: mode, editorHighlightLines: null, pdfHighlightLines: null }),
@@ -87,7 +101,7 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   // SyncTeX actions
   setEditorView: (view) => set({ editorView: view }),
-  setSyncTarget: (page, y) => set({ syncTargetPage: page, syncTargetY: y }),
+  setSyncTarget: (page, y, smooth = true) => set({ syncTargetPage: page, syncTargetY: y, syncTargetSmooth: smooth }),
   setSyncTargetLine: (line) => set({ syncTargetLine: line }),
   setLineMap: (map) => set({ lineMap: map }),
   setSyncSource: (source) => {
@@ -112,4 +126,8 @@ export const useEditorStore = create<EditorState>((set) => ({
     if (cur?.startLine === range?.startLine && cur?.endLine === range?.endLine) return;
     set({ pdfHighlightLines: range });
   },
+
+  // Auto-follow actions
+  setAutoFollow: (enabled) => set({ autoFollow: enabled }),
+  setActivePane: (pane) => set({ activePane: pane }),
 }));

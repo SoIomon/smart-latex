@@ -42,6 +42,8 @@ export default function Workspace() {
     compileLog,
     setCompileLog,
     setLineMap,
+    autoFollow,
+    setAutoFollow,
   } = useEditorStore();
   const { clearMessages } = useChatStore();
   const [saving, setSaving] = useState(false);
@@ -325,6 +327,16 @@ export default function Workspace() {
                 size="small"
                 checked={autoFix}
                 onChange={setAutoFix}
+              />
+            </Space>
+          </Tooltip>
+          <Tooltip title="光标移动时自动同步滚动">
+            <Space size={4}>
+              <Text style={{ fontSize: 12 }}>自动跟随</Text>
+              <Switch
+                size="small"
+                checked={autoFollow}
+                onChange={setAutoFollow}
               />
             </Space>
           </Tooltip>

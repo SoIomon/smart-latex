@@ -5,6 +5,8 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import { Empty, Spin } from 'antd';
 import { useEditorStore } from '../../stores/editorStore';
 import { forwardSync, inverseSync } from '../../api/synctex';
+import { interpolatePosition, reverseInterpolateLine, toSortedEntries } from './syncUtils';
+import type { LineMapEntry } from './syncUtils';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -17,48 +19,9 @@ interface PdfRegion {
   yEnd: number;
 }
 
-interface LineMapEntry {
-  line: number;
-  page: number;
-  y: number;
-}
-
 const PDF_PAGE_WIDTH = 595; // A4 width in PDF points
 const PDF_PAGE_HEIGHT = 842; // A4 height in PDF points
 const LINE_HEIGHT_PT = 14; // approximate line height padding in PDF points
-
-// Interpolate a PDF position for a given source line number.
-// With lineMap step=5, this avoids snapping to the nearest mapped line
-// and instead computes a precise y-coordinate between two known points.
-function interpolatePosition(
-  entries: LineMapEntry[],
-  line: number,
-): { page: number; y: number } {
-  // Find bracketing entries: largest line ≤ target, smallest line ≥ target
-  let lowerIdx = 0;
-  for (let i = 0; i < entries.length; i++) {
-    if (entries[i].line <= line) lowerIdx = i;
-    else break;
-  }
-  let upperIdx = entries.length - 1;
-  for (let i = entries.length - 1; i >= 0; i--) {
-    if (entries[i].line >= line) upperIdx = i;
-    else break;
-  }
-
-  const lower = entries[lowerIdx];
-  const upper = entries[upperIdx];
-
-  // Same entry or cross-page boundary: use nearest
-  if (lowerIdx === upperIdx || lower.page !== upper.page) {
-    const useLower = (line - lower.line) <= (upper.line - line);
-    return useLower ? { page: lower.page, y: lower.y } : { page: upper.page, y: upper.y };
-  }
-
-  // Interpolate between two entries on the same page
-  const t = (line - lower.line) / (upper.line - lower.line);
-  return { page: lower.page, y: lower.y + t * (upper.y - lower.y) };
-}
 
 function linesToPdfRegionsFromSorted(
   entries: LineMapEntry[],
@@ -126,12 +89,9 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
   const lineMap = useEditorStore((s) => s.lineMap);
 
   // Pre-sort lineMap entries (only re-computed when lineMap changes, i.e. after compilation)
-  const sortedEntries = useMemo(() => {
+  const sortedEntries = useMemo<LineMapEntry[]>(() => {
     if (!lineMap) return [];
-    return Object.entries(lineMap)
-      .map(([key, val]) => ({ line: parseInt(key, 10), page: val.page, y: val.y }))
-      .filter((e) => !isNaN(e.line))
-      .sort((a, b) => a.line - b.line);
+    return toSortedEntries(lineMap);
   }, [lineMap]);
 
   // Tier 1: lineMap interpolation — instant approximate highlight
@@ -375,6 +335,7 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
   }, []);
 
   // Forward sync: scroll PDF to target position
+  const syncTargetSmooth = useEditorStore((s) => s.syncTargetSmooth);
   useEffect(() => {
     if (syncTargetPage === null || syncSource === 'pdf') return;
     const pageEl = pageRefs.current.get(syncTargetPage);
@@ -390,15 +351,67 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
       }
 
       const scrollToY = pageRect.top - containerRect.top + container.scrollTop + yOffset - container.clientHeight / 3;
+      const behavior = syncTargetSmooth ? 'smooth' : 'auto';
+      const flagDuration = syncTargetSmooth ? 500 : 100;
       pdfProgrammaticScroll.current = true;
-      container.scrollTo({ top: scrollToY, behavior: 'smooth' });
-      setTimeout(() => { pdfProgrammaticScroll.current = false; }, 500);
+      container.scrollTo({ top: scrollToY, behavior });
+      setTimeout(() => { pdfProgrammaticScroll.current = false; }, flagDuration);
     }
     // Clear target after handling to prevent re-triggering when syncSource changes
     useEditorStore.getState().setSyncTarget(null, null);
-  }, [syncTargetPage, syncTargetY, syncSource]);
+  }, [syncTargetPage, syncTargetY, syncSource, syncTargetSmooth]);
 
   const pdfProgrammaticScroll = useRef(false);
+
+  // PDF scroll auto-follow: reverse lookup editor line from scroll position (RAF-throttled)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let rafId: number | null = null;
+    let lastFollowLine = -1;
+
+    const handleScroll = () => {
+      if (pdfProgrammaticScroll.current) return;
+      if (rafId !== null) return; // throttle to 1 per frame
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const state = useEditorStore.getState();
+        if (!state.autoFollow || sortedEntries.length === 0 || state.activePane !== 'pdf') return;
+
+        // Find which page is at the viewport center
+        const containerRect = container.getBoundingClientRect();
+        const centerY = containerRect.top + containerRect.height / 2;
+
+        let targetPage = 1;
+        let targetYInPage = 0;
+
+        for (const [pageNum, pageEl] of pageRefs.current.entries()) {
+          const pageRect = pageEl.getBoundingClientRect();
+          if (pageRect.top <= centerY && pageRect.bottom >= centerY) {
+            targetPage = pageNum;
+            const relativeY = centerY - pageRect.top;
+            const scaleY = PDF_PAGE_HEIGHT / pageRect.height;
+            targetYInPage = relativeY * scaleY;
+            break;
+          }
+        }
+
+        const line = reverseInterpolateLine(sortedEntries, targetPage, targetYInPage);
+        if (line !== null && line !== lastFollowLine) {
+          lastFollowLine = line;
+          state.setSyncSource('pdf');
+          state.setSyncTargetLine(line);
+        }
+      });
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, [sortedEntries]);
 
   const handlePageClick = useCallback(
     (pageNumber: number, event: React.MouseEvent<HTMLDivElement>) => {
@@ -439,6 +452,11 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
   return (
     <div
       ref={containerRef}
+      onMouseEnter={() => useEditorStore.getState().setActivePane('pdf')}
+      onMouseLeave={() => {
+        const s = useEditorStore.getState();
+        if (s.activePane === 'pdf') s.setActivePane(null);
+      }}
       style={{
         height: '100%',
         overflow: 'auto',
@@ -478,7 +496,7 @@ export default function PdfPreview({ pdfUrl, projectId, onPageClick }: PdfPrevie
                 cursor: onPageClick ? 'crosshair' : 'default',
                 position: 'relative',
               }}
-              onDoubleClick={(e) => handlePageClick(pageNum, e)}
+              onClick={(e) => handlePageClick(pageNum, e)}
             >
               <Page
                 pageNumber={pageNum}
