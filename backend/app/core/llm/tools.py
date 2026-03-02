@@ -156,15 +156,53 @@ TOOL_DEFINITIONS: list[dict] = [
     },
 ]
 
-# Heading patterns ordered by depth
-_HEADING_PATTERNS = [
-    (r"\\chapter\*?\{(.+?)\}", "chapter"),
-    (r"\\section\*?\{(.+?)\}", "section"),
-    (r"\\subsection\*?\{(.+?)\}", "subsection"),
-    (r"\\subsubsection\*?\{(.+?)\}", "subsubsection"),
-    (r"\\begin\{abstract\}", "abstract"),
-    (r"\\begin\{appendix\}", "appendix"),
+# Heading command patterns ordered by depth.
+# We only match the command prefix here; the title in braces is extracted
+# by _extract_brace_content() which handles nested braces correctly.
+_HEADING_COMMANDS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\\chapter\*?\{"), "chapter"),
+    (re.compile(r"\\section\*?\{"), "section"),
+    (re.compile(r"\\subsection\*?\{"), "subsection"),
+    (re.compile(r"\\subsubsection\*?\{"), "subsubsection"),
+    (re.compile(r"\\paragraph\*?\{"), "paragraph"),
+    (re.compile(r"\\subparagraph\*?\{"), "subparagraph"),
 ]
+
+# Non-command patterns (no brace extraction needed)
+_HEADING_ENVS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\\begin\{abstract\}"), "abstract"),
+    (re.compile(r"\\begin\{appendix\}"), "appendix"),
+]
+
+_HEADING_INDENT = {
+    "chapter": "",
+    "section": "  ",
+    "subsection": "    ",
+    "subsubsection": "      ",
+    "paragraph": "        ",
+    "subparagraph": "          ",
+}
+
+
+def _extract_brace_content(text: str, start: int) -> str | None:
+    """Extract content from balanced braces starting at *start*.
+
+    ``text[start]`` must be ``{``.  Returns the content between the
+    outermost ``{…}`` pair, correctly handling nested braces like
+    ``\\section{基于\\textbf{深度学习}的方法}``.
+    """
+    if start >= len(text) or text[start] != "{":
+        return None
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1 : i]
+    # Unbalanced — return everything after the opening brace
+    return text[start + 1 :]
 
 
 def _truncate(text: str) -> str:
@@ -182,13 +220,26 @@ def get_document_outline(doc: DocumentState) -> str:
     results: list[str] = []
     for idx, line in enumerate(doc.lines, 1):
         stripped = line.strip()
-        for pattern, level in _HEADING_PATTERNS:
-            m = re.search(pattern, stripped)
+        # Skip comment lines
+        if stripped.startswith("%"):
+            continue
+        matched = False
+        # 1) Heading commands with brace-balanced title extraction
+        for pattern, level in _HEADING_COMMANDS:
+            m = pattern.search(stripped)
             if m:
-                title = m.group(1) if m.lastindex else level
-                indent = {"chapter": "", "section": "  ", "subsection": "    ",
-                          "subsubsection": "      "}.get(level, "")
+                # m.end() points right after the opening '{'
+                title = _extract_brace_content(stripped, m.end() - 1) or ""
+                indent = _HEADING_INDENT.get(level, "")
                 results.append(f"L{idx}: {indent}{level}: {title}")
+                matched = True
+                break
+        if matched:
+            continue
+        # 2) Environment markers (abstract, appendix)
+        for pattern, level in _HEADING_ENVS:
+            if pattern.search(stripped):
+                results.append(f"L{idx}: {level}")
                 break
     if not results:
         return "未找到章节标题。文档可能没有使用标准 LaTeX 章节命令。"
