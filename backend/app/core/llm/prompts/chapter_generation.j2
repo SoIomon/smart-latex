@@ -41,17 +41,7 @@
 ## LaTeX 代码规范（必须严格遵守）
 1. 使用 {{ section_commands.top }}{ {{ chapter.title }} } 作为本章的顶级标题
 2. 子节使用 {{ section_commands.second }}{}，更深层级依次用 {{ section_commands.third }}{}、{{ section_commands.fourth }}{}
-3. 如果内容中有数据对比，尽量使用 \begin{table} ... \end{table} 呈现。表格规范：
-   a) table 环境结构：
-      \begin{table}[htbp]
-        \centering
-        \caption{简短标题}
-        \label{tab:ch{{ chapter_index }}_描述性名称}
-        \begin{tabular}{...} ... \end{tabular}
-      \end{table}
-   b) caption 简短精炼，不超过 15 个中文字符。
-   c) label 命名规则：tab:ch{{ chapter_index }}_描述性名称（加章节前缀防止跨章节重复）。
-   d) 引用表格时，必须使用 \ref{tab:ch{{ chapter_index }}_label} 交叉引用，禁止硬编码"表1""表3.3"等编号。引用格式示例："如表\ref{tab:ch{{ chapter_index }}_xxx}所示"。
+3. 如果内容中有数据对比，尽量使用 \begin{table} ... \end{table} 呈现
 4. 如果有列表内容，使用 \begin{itemize} 或 \begin{enumerate}
 5. 重要术语可用 \textbf{} 加粗
 6. 确保中文内容正确，不要乱码
@@ -75,4 +65,15 @@
    e) 图片路径必须加 images/ 前缀。宽度超过 15cm 时改用 width=0.9\textwidth。
    f) label 命名规则：fig:ch{{ chapter_index }}_文件名去掉扩展名（加章节前缀防止跨章节重复）。
 14. 引用图片时，必须使用 \ref{fig:ch{{ chapter_index }}_label} 交叉引用，禁止硬编码"图1""图2"等编号。引用格式示例："如图\ref{fig:ch{{ chapter_index }}_xxx}所示"。只引用本章内定义的图片 label，不要引用其他章节的图片。
-15. 所有交叉引用一律使用 \ref{} 命令，绝对禁止在正文中硬编码任何编号（如"图1""表3.3""公式2"等）。这包括图片、表格、公式、章节等所有可编号对象。
+15. 表格处理规则（与图片同等重要，必须严格遵守）：
+   a) table 环境结构：
+      \begin{table}[htbp]
+        \centering
+        \caption{简短标题}
+        \label{tab:ch{{ chapter_index }}_描述性名称}
+        \begin{tabular}{...} ... \end{tabular}
+      \end{table}
+   b) caption 简短精炼，不超过 15 个中文字符。
+   c) label 命名规则：tab:ch{{ chapter_index }}_描述性名称（加章节前缀防止跨章节重复）。
+16. 引用表格时，必须使用 \ref{tab:ch{{ chapter_index }}_label} 交叉引用，禁止硬编码"表1""表3.3"等编号。引用格式示例："如表\ref{tab:ch{{ chapter_index }}_xxx}所示"。只引用本章内定义的表格 label，不要引用其他章节的表格。
+17. 所有交叉引用一律使用 \ref{} 命令，绝对禁止在正文中硬编码任何编号（如"图1""表3.3""公式2"等）。这包括图片、表格、公式、章节等所有可编号对象。
