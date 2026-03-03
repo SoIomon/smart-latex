@@ -264,6 +264,17 @@ async def _validate_and_fix_chapter(
         error_summary[:200],
     )
 
+    # If no errors were extracted, skip LLM fix — the failure is likely an
+    # environment issue (missing fonts, packages) rather than a syntax error.
+    if not result.errors:
+        logger.warning(
+            "Chapter %d: validation returned rc!=0 but 0 extractable errors; "
+            "skipping LLM fix (likely environment issue). Log tail: %s",
+            chapter_index,
+            result.log[-500:] if result.log else "(empty)",
+        )
+        return chapter_content, False
+
     for attempt in range(max_fix_attempts):
         try:
             fixed_content = await fix_chapter_latex_errors(

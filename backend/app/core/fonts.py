@@ -6,6 +6,7 @@ configuration value (``mac`` / ``windows`` / ``linux``).
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -51,15 +52,30 @@ class CJKFonts:
     fangsong: str
 
 
+def _detect_platform_fontset() -> str:
+    """Detect the appropriate fontset based on the current OS."""
+    if sys.platform == "darwin":
+        return "mac"
+    elif sys.platform == "win32":
+        return "windows"
+    else:
+        return "linux"
+
+
 @lru_cache(maxsize=1)
 def get_cjk_fonts() -> CJKFonts:
     """Return CJK font names for the configured ``CJK_FONTSET``.
+
+    When ``CJK_FONTSET`` is ``"auto"`` (the default), the platform is
+    detected automatically via ``sys.platform``.
 
     Result is cached — ``CJK_FONTSET`` is fixed at startup.
     """
     from app.config import settings
 
-    fontset = getattr(settings, "CJK_FONTSET", "mac").lower()
+    fontset = getattr(settings, "CJK_FONTSET", "auto").lower()
+    if fontset == "auto":
+        fontset = _detect_platform_fontset()
     fonts = _FONT_MAPS.get(fontset, _FONT_MAPS["mac"])
     return CJKFonts(
         songti=fonts["songti"],

@@ -488,6 +488,16 @@ async def validate_latex_syntax(
 def _extract_errors(log: str) -> list[str]:
     errors = []
     for line in log.split("\n"):
-        if line.startswith("!") or "Error" in line:
-            errors.append(line.strip())
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Standard TeX errors (e.g. "! Undefined control sequence.")
+        if stripped.startswith("!"):
+            errors.append(stripped)
+        # Lines containing "Error" (e.g. "Package fontspec Error:")
+        elif "Error" in stripped:
+            errors.append(stripped)
+        # Font-related failures that may lack "!" prefix
+        elif "nullfont" in stripped or "not loadable" in stripped:
+            errors.append(stripped)
     return errors
