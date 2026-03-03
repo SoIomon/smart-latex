@@ -17,7 +17,7 @@ from app.core.llm.tools import TOOL_DEFINITIONS, DocumentState, execute_tool
 
 logger = logging.getLogger(__name__)
 
-MAX_AGENT_TURNS = 15
+MAX_AGENT_TURNS = 50
 MAX_HISTORY_ROUNDS = 6  # keep last N user/assistant pairs
 CHUNK_SIZE = 50  # characters per simulated stream chunk
 
