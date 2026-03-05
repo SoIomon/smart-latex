@@ -49,3 +49,7 @@ backend/logs/*
 
 # Test documents (local only)
 test_doc/
+
+# Feishu Bot 暂存区
+.feishu_temp/
+logs
