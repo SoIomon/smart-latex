@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, Form, Input, Button, message, Space, Typography, Spin, Alert, Tag, Collapse } from 'antd';
-import { SaveOutlined, ApiOutlined, MedicineBoxOutlined, CheckCircleOutlined, WarningOutlined, CloseCircleOutlined } from '@ant-design/icons';
-import { getLLMConfig, updateLLMConfig, testLLMConnection, runDiagnostics } from '../../api/settings';
+import { SaveOutlined, ApiOutlined, MedicineBoxOutlined, CheckCircleOutlined, WarningOutlined, CloseCircleOutlined, DownloadOutlined } from '@ant-design/icons';
+import { getLLMConfig, updateLLMConfig, testLLMConnection, runDiagnostics, installFonts } from '../../api/settings';
 import type { DiagnosticItem, DiagnosticsResult } from '../../api/settings';
 
 const { Title, Text } = Typography;
@@ -15,6 +15,7 @@ export default function Settings() {
   const [currentMaskedKey, setCurrentMaskedKey] = useState('');
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagResult, setDiagResult] = useState<DiagnosticsResult | null>(null);
+  const [fontInstalling, setFontInstalling] = useState(false);
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -90,6 +91,24 @@ export default function Settings() {
       message.error('环境检测失败');
     } finally {
       setDiagLoading(false);
+    }
+  };
+
+  const handleFontInstall = async () => {
+    setFontInstalling(true);
+    try {
+      const result = await installFonts();
+      if (result.status === 'ok') {
+        message.success(result.message);
+        // Re-run diagnostics to refresh font status
+        handleDiagnostics();
+      } else {
+        message.error(result.message);
+      }
+    } catch {
+      message.error('字体安装失败');
+    } finally {
+      setFontInstalling(false);
     }
   };
 
@@ -179,15 +198,24 @@ export default function Settings() {
       <Text type="secondary">检查 LaTeX 编译器、字体等运行环境是否就绪。</Text>
 
       <Card style={{ marginTop: 16 }}>
-        <Button
-          icon={<MedicineBoxOutlined />}
-          loading={diagLoading}
-          onClick={handleDiagnostics}
-          type="primary"
-          ghost
-        >
-          运行环境检测
-        </Button>
+        <Space>
+          <Button
+            icon={<MedicineBoxOutlined />}
+            loading={diagLoading}
+            onClick={handleDiagnostics}
+            type="primary"
+            ghost
+          >
+            运行环境检测
+          </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            loading={fontInstalling}
+            onClick={handleFontInstall}
+          >
+            安装内置字体
+          </Button>
+        </Space>
 
         {diagResult && (
           <div style={{ marginTop: 16 }}>

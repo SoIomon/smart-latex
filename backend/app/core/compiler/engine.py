@@ -253,11 +253,23 @@ def _fix_truncated_latex(content: str) -> str:
 
 
 def _build_tex_env() -> dict[str, str]:
-    """Build environment dict with TeX binaries in PATH, cross-platform."""
+    """Build environment dict with TeX binaries in PATH, cross-platform.
+
+    Also sets OSFONTDIR to include bundled FandolFonts so fontspec can
+    always find CJK fallback fonts regardless of system font installation.
+    """
+    from app.core.fonts import get_bundled_fonts_dir
+
     env = {**os.environ}
     tex_bin = "/Library/TeX/texbin"
     if platform.system() != "Windows" and Path(tex_bin).is_dir():
         env["PATH"] = f"{tex_bin}{os.pathsep}{env.get('PATH', '')}"
+
+    # Add bundled fonts to OSFONTDIR so XeTeX/fontspec can find them
+    bundled = str(get_bundled_fonts_dir())
+    existing = env.get("OSFONTDIR", "")
+    env["OSFONTDIR"] = f"{bundled}{os.pathsep}{existing}" if existing else bundled
+
     return env
 
 

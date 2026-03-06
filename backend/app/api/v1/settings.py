@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.api.schemas.schemas import LLMConfigResponse, LLMConfigUpdate
 from app.config import settings
 from app.core.compiler.engine import _build_tex_env, _run_subprocess
-from app.core.fonts import get_cjk_fonts, _detect_platform_fontset
+from app.core.fonts import get_cjk_fonts, _detect_platform_fontset, install_bundled_fonts
 from app.core.llm.client import doubao_client, get_llm_config, refresh_llm_config
 from app.models.database import async_session
 from app.models.models import LLMConfig
@@ -248,27 +248,24 @@ async def run_diagnostics():
         *[_check_font(f[1], env) for f in font_roles]
     )
 
+    is_fallback = fonts.is_fallback
+    _fandol_names = {"FandolSong", "FandolHei", "FandolKai", "FandolFang"}
     all_fonts_ok = True
     for (role, font_name), available in zip(font_roles, font_checks):
         if available:
+            suffix = "（内置 Fandol 字体）" if font_name in _fandol_names else ""
             items.append(DiagnosticItem(
                 name=f"字体 · {role}",
                 status="ok",
-                message=f"{font_name} ✓",
+                message=f"{font_name} ✓{suffix}",
             ))
         else:
             all_fonts_ok = False
-            if os_name == "Windows":
-                suggestion = f"请确认系统已安装 {font_name} 字体"
-            elif os_name == "Darwin":
-                suggestion = f"macOS 预装字体可能名称不同，当前期望: {font_name}"
-            else:
-                suggestion = f"sudo apt install fonts-noto-cjk 或安装 {font_name}"
             items.append(DiagnosticItem(
                 name=f"字体 · {role}",
                 status="warning",
                 message=f"未检测到 {font_name}",
-                suggestion=suggestion,
+                suggestion="点击下方「安装内置字体」可一键安装 FandolFonts 开源中文字体",
             ))
 
     if not all_fonts_ok:
@@ -276,7 +273,17 @@ async def run_diagnostics():
             name="字体集配置",
             status="warning",
             message=f"当前字体集: {fontset} (CJK_FONTSET={settings.CJK_FONTSET})",
-            suggestion="如果字体检测不正确，可在 .env 中设置 CJK_FONTSET=windows/mac/linux",
+            suggestion=(
+                "部分字体缺失，可点击「安装内置字体」一键安装 FandolFonts，"
+                "或在 .env 中设置 CJK_FONTSET=fandol/windows/mac/linux"
+            ),
+        ))
+    elif is_fallback:
+        items.append(DiagnosticItem(
+            name="字体集配置",
+            status="ok",
+            message=f"使用内置 FandolFonts 字体（自动降级）",
+            suggestion="如需更好的排版效果，可安装系统原生中文字体（如 macOS 宋体/黑体）",
         ))
 
     # 6. Quick compile test
@@ -323,3 +330,19 @@ async def run_diagnostics():
         platform=f"{os_name} ({fontset})",
         items=items,
     )
+
+
+# ---------------------------------------------------------------------------
+# Font installation
+# ---------------------------------------------------------------------------
+
+class FontInstallResponse(BaseModel):
+    status: str  # "ok" | "error"
+    message: str
+
+
+@router.post("/fonts/install", response_model=FontInstallResponse)
+async def install_fonts():
+    """Install bundled FandolFonts to the user's system font directory."""
+    result = await asyncio.to_thread(install_bundled_fonts)
+    return FontInstallResponse(**result)

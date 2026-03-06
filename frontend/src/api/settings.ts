@@ -40,3 +40,8 @@ export async function runDiagnostics(): Promise<DiagnosticsResult> {
   const { data } = await client.get('/settings/diagnostics');
   return data;
 }
+
+export async function installFonts(): Promise<{ status: string; message: string }> {
+  const { data } = await client.post('/settings/fonts/install');
+  return data;
+}
