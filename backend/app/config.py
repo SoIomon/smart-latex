@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     CJK_FONTSET: str = "auto"  # auto / mac / windows / linux
 
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    CORS_ORIGINS: list[str] = ["http://localhost:15173", "http://127.0.0.1:15173"]
 
     LOG_LEVEL: str = "DEBUG"
     LOG_FILE: str = "logs/smart_latex.log"

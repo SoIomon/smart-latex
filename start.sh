@@ -8,7 +8,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$PROJECT_ROOT/backend"
 FRONTEND_DIST="$PROJECT_ROOT/frontend/dist"
-PORT="${PORT:-8000}"
+PORT="${PORT:-18923}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

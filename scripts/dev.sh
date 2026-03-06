@@ -38,7 +38,7 @@ fi
 echo ""
 echo "Starting backend server..."
 cd "$BACKEND_DIR"
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
+uvicorn app.main:app --reload --host 0.0.0.0 --port 18923 &
 BACKEND_PID=$!
 echo "  Backend PID: $BACKEND_PID"
 
@@ -48,7 +48,7 @@ echo "  Backend PID: $BACKEND_PID"
 echo ""
 echo "Starting frontend dev server..."
 cd "$FRONTEND_DIR"
-npm run dev -- --host 0.0.0.0 --port 5173 &
+npm run dev -- --host 0.0.0.0 --port 15173 &
 FRONTEND_PID=$!
 echo "  Frontend PID: $FRONTEND_PID"
 
@@ -59,9 +59,9 @@ echo ""
 echo "========================================="
 echo "  Services running:"
 echo ""
-echo "  Frontend:  http://localhost:5173"
-echo "  Backend:   http://localhost:8000"
-echo "  API Docs:  http://localhost:8000/docs"
+echo "  Frontend:  http://localhost:15173"
+echo "  Backend:   http://localhost:18923"
+echo "  API Docs:  http://localhost:18923/docs"
 echo ""
 echo "  Press Ctrl+C to stop all services"
 echo "========================================="
