@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Card, Form, Input, Button, message, Space, Typography, Spin, Alert } from 'antd';
-import { SaveOutlined, ApiOutlined } from '@ant-design/icons';
-import { getLLMConfig, updateLLMConfig, testLLMConnection } from '../../api/settings';
+import { Card, Form, Input, Button, message, Space, Typography, Spin, Alert, Tag, Collapse } from 'antd';
+import { SaveOutlined, ApiOutlined, MedicineBoxOutlined, CheckCircleOutlined, WarningOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { getLLMConfig, updateLLMConfig, testLLMConnection, runDiagnostics } from '../../api/settings';
+import type { DiagnosticItem, DiagnosticsResult } from '../../api/settings';
 
 const { Title, Text } = Typography;
 
@@ -12,6 +13,8 @@ export default function Settings() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [currentMaskedKey, setCurrentMaskedKey] = useState('');
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagResult, setDiagResult] = useState<DiagnosticsResult | null>(null);
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -75,6 +78,31 @@ export default function Settings() {
     } finally {
       setTesting(false);
     }
+  };
+
+  const handleDiagnostics = async () => {
+    setDiagLoading(true);
+    setDiagResult(null);
+    try {
+      const result = await runDiagnostics();
+      setDiagResult(result);
+    } catch {
+      message.error('环境检测失败');
+    } finally {
+      setDiagLoading(false);
+    }
+  };
+
+  const statusIcon = (status: DiagnosticItem['status']) => {
+    if (status === 'ok') return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
+    if (status === 'warning') return <WarningOutlined style={{ color: '#faad14' }} />;
+    return <CloseCircleOutlined style={{ color: '#f5222d' }} />;
+  };
+
+  const statusTag = (status: DiagnosticItem['status']) => {
+    if (status === 'ok') return <Tag color="success">正常</Tag>;
+    if (status === 'warning') return <Tag color="warning">警告</Tag>;
+    return <Tag color="error">异常</Tag>;
   };
 
   return (
@@ -144,6 +172,88 @@ export default function Settings() {
               </Space>
             </Form.Item>
           </Form>
+        )}
+      </Card>
+
+      <Title level={3} style={{ marginTop: 32 }}>环境检测</Title>
+      <Text type="secondary">检查 LaTeX 编译器、字体等运行环境是否就绪。</Text>
+
+      <Card style={{ marginTop: 16 }}>
+        <Button
+          icon={<MedicineBoxOutlined />}
+          loading={diagLoading}
+          onClick={handleDiagnostics}
+          type="primary"
+          ghost
+        >
+          运行环境检测
+        </Button>
+
+        {diagResult && (
+          <div style={{ marginTop: 16 }}>
+            <Text strong>平台: </Text>
+            <Text>{diagResult.platform}</Text>
+
+            <div style={{ marginTop: 12 }}>
+              {diagResult.items.map((item, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    padding: '8px 0',
+                    borderBottom: idx < diagResult.items.length - 1 ? '1px solid #f0f0f0' : undefined,
+                  }}
+                >
+                  <span style={{ marginRight: 8, marginTop: 2 }}>{statusIcon(item.status)}</span>
+                  <div style={{ flex: 1 }}>
+                    <div>
+                      <Text strong>{item.name}</Text>
+                      {' '}
+                      {statusTag(item.status)}
+                    </div>
+                    <Text type="secondary" style={{ fontSize: 13 }}>{item.message}</Text>
+                    {item.suggestion && (
+                      <Collapse
+                        ghost
+                        size="small"
+                        items={[{
+                          key: '1',
+                          label: <Text type="secondary" style={{ fontSize: 12 }}>查看建议</Text>,
+                          children: (
+                            <Text
+                              style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}
+                              copyable
+                            >
+                              {item.suggestion}
+                            </Text>
+                          ),
+                        }]}
+                        style={{ marginTop: 4, marginLeft: -16 }}
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {diagResult.items.every(i => i.status === 'ok') && (
+              <Alert
+                type="success"
+                message="所有检测项均正常，环境就绪！"
+                showIcon
+                style={{ marginTop: 12 }}
+              />
+            )}
+            {diagResult.items.some(i => i.status === 'error') && (
+              <Alert
+                type="error"
+                message="存在异常项，可能影响文档生成和编译功能。请参考各项建议进行修复。"
+                showIcon
+                style={{ marginTop: 12 }}
+              />
+            )}
+          </div>
         )}
       </Card>
     </div>

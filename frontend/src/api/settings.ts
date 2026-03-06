@@ -23,3 +23,20 @@ export async function testLLMConnection(params: {
   const { data } = await client.post('/settings/llm/test', params);
   return data;
 }
+
+export interface DiagnosticItem {
+  name: string;
+  status: 'ok' | 'warning' | 'error';
+  message: string;
+  suggestion: string;
+}
+
+export interface DiagnosticsResult {
+  platform: string;
+  items: DiagnosticItem[];
+}
+
+export async function runDiagnostics(): Promise<DiagnosticsResult> {
+  const { data } = await client.get('/settings/diagnostics');
+  return data;
+}
