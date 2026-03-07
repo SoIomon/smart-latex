@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BackendDir = Join-Path $ProjectRoot "backend"
 $FrontendDist = Join-Path $ProjectRoot "frontend\dist"
-$Port = if ($env:PORT) { $env:PORT } else { "8000" }
+$Port = if ($env:PORT) { $env:PORT } else { "18923" }
 
 # Check venv
 $VenvDir = Join-Path $BackendDir "venv"

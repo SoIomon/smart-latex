@@ -30,7 +30,7 @@ $BackendJob = Start-Job -ScriptBlock {
     param($dir, $activate)
     & $activate
     Set-Location $dir
-    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    uvicorn app.main:app --reload --host 0.0.0.0 --port 18923
 } -ArgumentList $BackendDir, $ActivateScript
 
 Write-Host "  Backend Job ID: $($BackendJob.Id)"
@@ -41,7 +41,7 @@ Write-Host "Starting frontend dev server..."
 $FrontendJob = Start-Job -ScriptBlock {
     param($dir)
     Set-Location $dir
-    npm run dev -- --host 0.0.0.0 --port 5173
+    npm run dev -- --host 0.0.0.0 --port 15173
 } -ArgumentList $FrontendDir
 
 Write-Host "  Frontend Job ID: $($FrontendJob.Id)"
@@ -51,9 +51,9 @@ Write-Host ""
 Write-Host "========================================="
 Write-Host "  Services running:"
 Write-Host ""
-Write-Host "  Frontend:  http://localhost:5173"
-Write-Host "  Backend:   http://localhost:8000"
-Write-Host "  API Docs:  http://localhost:8000/docs"
+Write-Host "  Frontend:  http://localhost:15173"
+Write-Host "  Backend:   http://localhost:18923"
+Write-Host "  API Docs:  http://localhost:18923/docs"
 Write-Host ""
 Write-Host "  Press Ctrl+C to stop all services"
 Write-Host "========================================="
