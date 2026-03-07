@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.compiler.engine import validate_latex_syntax
+from app.core.compiler.engine import validate_latex_syntax, _fix_common_latex_issues
 from app.core.llm.chains import (
     analyze_document,
     plan_outline,
@@ -270,7 +270,6 @@ async def _validate_and_fix_chapter(
     preamble: str,
     chapter_content: str,
     chapter_index: int,
-    max_fix_attempts: int = 1,
     support_dirs: list[Path] | None = None,
 ) -> tuple[str, bool]:
     """Validate a chapter's LaTeX syntax and auto-fix if errors are found.
@@ -311,7 +310,10 @@ async def _validate_and_fix_chapter(
     )
 
     # Phase 2: Fix agent with markers for chapter extraction
-    marked_doc = (
+    # Apply _fix_common_latex_issues so the agent's document matches the
+    # line numbers in the xelatex error log (validate_latex_syntax applies
+    # this transform internally before compiling).
+    marked_doc = _fix_common_latex_issues(
         preamble + "\n"
         + _CHAPTER_START_MARKER + "\n"
         + chapter_content + "\n"

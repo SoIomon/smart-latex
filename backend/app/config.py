@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _resolve_relative_paths(self) -> "Settings":
-        """Resolve relative STORAGE_DIR / DATABASE_URL to backend/ directory."""
+        """Resolve relative STORAGE_DIR / DATABASE_URL / LOG_FILE to backend/ directory."""
         storage = Path(self.STORAGE_DIR)
         if not storage.is_absolute():
             self.STORAGE_DIR = str(_BACKEND_DIR / storage)
@@ -35,6 +35,10 @@ class Settings(BaseSettings):
             db_path = Path(self.DATABASE_URL[len(prefix):])
             if not db_path.is_absolute():
                 self.DATABASE_URL = prefix + str(_BACKEND_DIR / db_path)
+
+        log_path = Path(self.LOG_FILE)
+        if not log_path.is_absolute():
+            self.LOG_FILE = str(_BACKEND_DIR / log_path)
 
         return self
 

@@ -97,9 +97,10 @@ async def compile_and_fix(
             cleanup_sandbox(sandbox)
 
             if result.success:
-                # Save fixed LaTeX back to project if it was modified
+                # Always remap CJK fonts for the current platform
+                current_latex = remap_cjk_fonts(current_latex)
+                # Save back to project if content was modified
                 if current_latex != latex_content:
-                    current_latex = remap_cjk_fonts(current_latex)
                     await project_service.update_project(
                         db, project, latex_content=current_latex
                     )

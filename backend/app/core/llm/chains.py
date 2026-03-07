@@ -338,36 +338,6 @@ async def generate_chapter(
     return content
 
 
-async def fix_latex_errors(
-    latex_content: str,
-    errors: str,
-) -> str:
-    """Use LLM to fix LaTeX compilation errors."""
-    prompt = _render_prompt(
-        "fix_errors.j2",
-        latex_content=latex_content,
-        errors=errors,
-    )
-    messages = [{"role": "user", "content": prompt}]
-    response = await doubao_client.chat(messages, temperature=0.2)
-    return extract_latex(response)
-
-
-async def fix_chapter_latex_errors(
-    chapter_content: str,
-    errors: str,
-) -> str:
-    """Use LLM to fix LaTeX errors in a chapter fragment (not a full document)."""
-    prompt = _render_prompt(
-        "fix_chapter_errors.j2",
-        chapter_content=chapter_content,
-        errors=errors,
-    )
-    messages = [{"role": "user", "content": prompt}]
-    response = await doubao_client.chat(messages, temperature=0.2)
-    return extract_latex(response)
-
-
 async def extract_format_requirements(
     doc_text: str,
     formatting_metadata: dict,
