@@ -68,57 +68,168 @@ def _get_section_commands(doc_class: str) -> dict:
         }
 
 
-def _get_template_rules(template_id: str) -> str:
-    """Extract formatting rules from template metadata for use in prompts."""
+def _get_structured_template_rules(template_id: str) -> str:
+    """Extract structured formatting rules from template for LLM prompts.
+
+    Instead of dumping the raw preamble, this extracts only the key formatting
+    information that the LLM needs to generate consistent content.
+    """
+    import re
+
     meta = get_template(template_id)
     if not meta:
         return ""
 
     rules_parts = []
+
+    # 1. Template description
     if meta.get("description"):
-        rules_parts.append(f"模板类型：{meta['name']} — {meta['description']}")
+        rules_parts.append(f"模板：{meta['name']}（{meta['description']}）")
 
-    variables = meta.get("variables", {})
-    if variables:
-        # Extract any formatting hints from variable descriptions
-        for var_name, var_info in variables.items():
-            if isinstance(var_info, dict) and var_info.get("description"):
-                rules_parts.append(f"- {var_name}: {var_info['description']}")
+    # 2. Parse preamble for key settings
+    tex_content = get_template_content(template_id)
+    if not tex_content:
+        return "\n".join(rules_parts)
 
-    # Also include the template .tex.j2 content as reference for LaTeX structure
+    bd_pos = _find_real_begin_document(tex_content)
+    dc_match = re.search(r'\\documentclass', tex_content) if bd_pos is not None else None
+
+    if dc_match and bd_pos is not None:
+        preamble = tex_content[dc_match.start():bd_pos]
+        # Strip Jinja2 delimiters
+        preamble_clean = re.sub(r'<<\s*.*?\s*>>', '', preamble)
+        preamble_clean = re.sub(r'<%.*?%>', '', preamble_clean)
+        preamble_clean = re.sub(r'<#.*?#>', '', preamble_clean)
+
+        # Document class + options
+        dc = re.search(r'\\documentclass\[([^\]]*)\]\{([^}]+)\}', preamble_clean)
+        if dc:
+            rules_parts.append(f"文档类型：{dc.group(2)}，选项：{dc.group(1)}")
+        else:
+            dc = re.search(r'\\documentclass\{([^}]+)\}', preamble_clean)
+            if dc:
+                rules_parts.append(f"文档类型：{dc.group(1)}")
+
+        # Key packages
+        pkgs = re.findall(r'\\usepackage(?:\[[^\]]*\])?\{([^}]+)\}', preamble_clean)
+        key_pkgs = [p.strip() for pkg_group in pkgs for p in pkg_group.split(',')]
+        if key_pkgs:
+            rules_parts.append(f"已加载宏包：{', '.join(key_pkgs[:20])}")
+
+        # Geometry
+        geo = re.search(r'\\geometry\{([^}]+)\}', preamble_clean)
+        if geo:
+            rules_parts.append(f"页面版式：{geo.group(1)}")
+
+        # Line spacing
+        if r'\onehalfspacing' in preamble_clean:
+            rules_parts.append("行距：1.5 倍")
+        elif r'\doublespacing' in preamble_clean:
+            rules_parts.append("行距：2 倍")
+        spacing = re.search(r'\\setstretch\{([^}]+)\}', preamble_clean)
+        if spacing:
+            rules_parts.append(f"行距：{spacing.group(1)} 倍")
+
+        # Font hints
+        if 'ctex' in preamble_clean.lower() or 'fontset' in preamble_clean.lower():
+            rules_parts.append("字体：中文使用 ctex 预定义命令（\\songti、\\heiti 等），不要自定义字体")
+
+    # 3. Section hierarchy examples (from body)
+    doc_class = meta.get("doc_class_type") or _detect_document_class(template_id)
+    section_cmds = _get_section_commands(doc_class)
+    rules_parts.append(
+        f"章节层级：{section_cmds['top']}{{}} → {section_cmds['second']}{{}} → "
+        f"{section_cmds['third']}{{}} → {section_cmds['fourth']}{{}}"
+    )
+
+    return "\n".join(rules_parts)
+
+
+def _get_template_structure_info(template_id: str) -> dict:
+    """Extract template structure info for outline planning.
+
+    Returns a dict with: name, description, doc_class_type, section_commands,
+    fixed_sections (auto-generated content like cover/toc), suggested_chapter_range.
+    """
+    import re
+
+    meta = get_template(template_id)
+    if not meta:
+        return {}
+
+    doc_class = meta.get("doc_class_type") or _detect_document_class(template_id)
+    section_cmds = _get_section_commands(doc_class)
+
+    # Scan template body for fixed content (maketitle, tableofcontents, etc.)
+    fixed_sections = []
     tex_content = get_template_content(template_id)
     if tex_content:
-        # Extract preamble (documentclass to begin{document}) as formatting reference.
-        # Use _find_real_begin_document to skip \begin{document} inside comments.
-        import re
         bd_pos = _find_real_begin_document(tex_content)
-        dc_match = re.search(r'\\documentclass', tex_content) if bd_pos is not None else None
-        if dc_match and bd_pos is not None:
-            preamble = tex_content[dc_match.start():bd_pos].strip()
-            # Strip Jinja2 custom delimiters so LLM doesn't see raw template syntax
-            preamble = re.sub(r'<<\s*.*?\s*>>', '', preamble)
-            preamble = re.sub(r'<%.*?%>', '', preamble)
-            preamble = re.sub(r'<#.*?#>', '', preamble)
-            rules_parts.append(f"\n参考模板的 LaTeX 导言区设置（请保持一致的格式风格）：\n{preamble}")
-
-        # Extract example body content for section hierarchy reference
         if bd_pos is not None:
-            body_start = bd_pos + len(r'\begin{document}')
-            ed_match = re.search(r'\\end\{document\}', tex_content[body_start:])
-            body_text = tex_content[body_start:body_start + ed_match.start()].strip() if ed_match else None
-        else:
-            body_text = None
-        if body_text:
-            # Extract section hierarchy examples (first few)
-            section_examples = []
-            for m in re.finditer(r'(\\(?:chapter|section|subsection|subsubsection|paragraph|subparagraph)\{[^}]+\})', body_text):
-                section_examples.append(m.group(1))
-                if len(section_examples) >= 8:
-                    break
-            if section_examples:
-                rules_parts.append(f"\n模板的章节层级示例（请保持一致的层级结构）：\n" + "\n".join(section_examples))
+            body = tex_content[bd_pos:]
+            fixed_patterns = [
+                (r'\\maketitle', '封面/标题页'),
+                (r'\\tableofcontents', '目录'),
+                (r'\\listoffigures', '图片列表'),
+                (r'\\listoftables', '表格列表'),
+                (r'\\makedeclaration', '声明页'),
+                (r'\\MAKETITLE', '英文封面'),
+                (r'\\begin\{abstract\}', '摘要'),
+                (r'\\frontmatter', '前置部分'),
+                (r'\\mainmatter', '正文部分'),
+                (r'\\backmatter', '后置部分'),
+                (r'\\bibliography', '参考文献'),
+            ]
+            for pattern, label in fixed_patterns:
+                if re.search(pattern, body):
+                    fixed_sections.append(label)
 
-    return "\n".join(rules_parts) if rules_parts else ""
+    # Suggested chapter range based on document class
+    if doc_class in ("book", "ctexbook"):
+        suggested_range = "4-8"
+    elif doc_class in ("report", "ctexrep", "ucasthesis"):
+        suggested_range = "3-7"
+    else:
+        suggested_range = "3-6"
+
+    return {
+        "name": meta.get("name", template_id),
+        "description": meta.get("description", ""),
+        "doc_class_type": doc_class,
+        "section_commands": section_cmds,
+        "fixed_sections": fixed_sections,
+        "suggested_chapter_range": suggested_range,
+    }
+
+
+def _build_outline_summary(chapters: list[dict]) -> str:
+    """Build a full-document outline summary for cross-chapter context.
+
+    Returns a string listing all chapters with their subsections.
+    The current chapter marker is added by _mark_current_chapter().
+    """
+    lines = []
+    for i, ch in enumerate(chapters):
+        title = ch.get("title", f"章节 {i + 1}")
+        desc = ch.get("description", "")
+        lines.append(f"第 {i + 1} 章：{title}")
+        if desc:
+            lines.append(f"  内容：{desc}")
+        for sub in ch.get("subsections", []):
+            lines.append(f"  - {sub.get('title', '')}")
+    return "\n".join(lines)
+
+
+def _mark_current_chapter(outline_summary: str, current_index: int) -> str:
+    """Mark the current chapter in the outline summary."""
+    lines = outline_summary.split("\n")
+    result = []
+    for line in lines:
+        if line.startswith(f"第 {current_index + 1} 章："):
+            result.append(f">>> {line} <<< [当前章节]")
+        else:
+            result.append(line)
+    return "\n".join(result)
 
 
 def _build_preamble_from_template(outline: dict, template_id: str) -> str:
@@ -375,39 +486,38 @@ async def generate_latex_from_documents(
 
 
 async def generate_latex_pipeline(
-    db: AsyncSession,
-    project_id: str,
+    documents: list[dict],
     template_id: str,
-    document_ids: list[str],
+    project_images_dir: Path | None = None,
 ) -> AsyncGenerator[dict, None]:
-    """Pipeline generation with structured SSE events for frontend progress tracking."""
-    documents = await _gather_documents(db, project_id, document_ids)
+    """Pipeline generation with structured SSE events.
 
+    Pure function — no DB dependency.  DB operations are handled by the API layer.
+    """
     if not documents:
         yield {"event": "error", "message": "没有找到文档，请先上传文档"}
         return
 
     total_docs = len(documents)
-    template_rules = _get_template_rules(template_id)
+    template_rules = _get_structured_template_rules(template_id)
     doc_class = _detect_document_class(template_id)
     section_commands = _get_section_commands(doc_class)
     support_dirs = get_template_support_dirs(template_id)
 
-    # Add project images directory for compilation validation
-    images_dir = settings.storage_path / project_id / "images"
-    if images_dir.is_dir():
-        support_dirs.append(images_dir)
+    if project_images_dir and project_images_dir.is_dir():
+        support_dirs.append(project_images_dir)
+
+    total_stages = 4  # analyze, outline, generate, review
 
     # ===== Stage 1: Analyze each document =====
     yield {
         "event": "stage",
         "stage": "analyze",
-        "message": f"阶段 1/3：分析 {total_docs} 篇文档...",
+        "message": f"阶段 1/{total_stages}：分析 {total_docs} 篇文档...",
         "progress": 0,
     }
 
     analyses = []
-    # Process in batches of 5 for concurrency control
     batch_size = 10
     for batch_start in range(0, total_docs, batch_size):
         batch_end = min(batch_start + batch_size, total_docs)
@@ -428,7 +538,6 @@ async def generate_latex_pipeline(
             doc_idx = batch_start + i
             if isinstance(result, Exception):
                 logger.warning(f"Failed to analyze doc {doc_idx + 1}: {result}")
-                # Fallback analysis
                 analyses.append({
                     "title": documents[doc_idx]["filename"],
                     "authors": [],
@@ -455,11 +564,12 @@ async def generate_latex_pipeline(
     yield {
         "event": "stage",
         "stage": "outline",
-        "message": "阶段 2/3：规划文档大纲...",
+        "message": f"阶段 2/{total_stages}：规划文档大纲...",
         "progress": 0,
     }
 
-    outline = await plan_outline(analyses, template_id)
+    template_structure = _get_template_structure_info(template_id)
+    outline = await plan_outline(analyses, template_id, template_structure=template_structure)
 
     yield {
         "event": "outline",
@@ -476,17 +586,16 @@ async def generate_latex_pipeline(
     yield {
         "event": "stage",
         "stage": "generate",
-        "message": f"阶段 3/3：并行生成 {total_chapters} 个章节...",
+        "message": f"阶段 3/{total_stages}：并行生成 {total_chapters} 个章节...",
         "progress": 0,
     }
 
-    # Build document preamble from template
     preamble = _build_preamble_from_template(outline, template_id)
     full_latex = preamble
 
     yield {"event": "chunk", "content": preamble}
 
-    # Prepare source docs for each chapter
+    # Prepare source docs for each chapter (no analysis — only raw content)
     chapter_sources = []
     for chapter in chapters:
         source_doc_indices = chapter.get("source_docs", [])
@@ -497,11 +606,12 @@ async def generate_latex_pipeline(
                 source_docs.append({
                     "filename": doc["filename"],
                     "content": doc["content"],
-                    "analysis": analyses[idx - 1],
                 })
         chapter_sources.append(source_docs)
 
-    # Generate chapters in parallel batches of 3
+    # Build outline summary for cross-chapter context
+    outline_summary_base = _build_outline_summary(chapters)
+
     chapter_batch_size = 8
     chapter_results: list[str | None] = [None] * total_chapters
     failed_chapters: dict[int, str] = {}
@@ -527,6 +637,7 @@ async def generate_latex_pipeline(
                 source_documents=chapter_sources[ch_idx],
                 template_rules=template_rules,
                 section_commands=section_commands,
+                outline_summary=_mark_current_chapter(outline_summary_base, ch_idx),
             )
             for ch_idx in range(batch_start, batch_end)
         ]
@@ -547,7 +658,7 @@ async def generate_latex_pipeline(
         validate_tasks = []
         validate_indices = []
         for i in range(batch_start, batch_end):
-            if chapter_results[i] is not None:  # skip failed chapters
+            if chapter_results[i] is not None:
                 validate_tasks.append(
                     _validate_and_fix_chapter(
                         preamble, chapter_results[i], i + 1,
@@ -604,10 +715,46 @@ async def generate_latex_pipeline(
     # Clean the full output
     cleaned = extract_latex(full_latex)
 
+    # ===== Stage 4: Review & Revise =====
+    yield {
+        "event": "stage",
+        "stage": "review",
+        "message": f"阶段 4/{total_stages}：审查与修订...",
+        "progress": 0,
+    }
+
+    try:
+        from app.core.llm.review_agent import review_and_revise
+        revised, summary = await review_and_revise(cleaned)
+        if revised and revised != cleaned:
+            cleaned = revised
+            logger.info("Review agent revised the document: %s", summary)
+            yield {
+                "event": "stage",
+                "stage": "review",
+                "message": f"审查完成：{summary}",
+                "progress": 100,
+            }
+        else:
+            yield {
+                "event": "stage",
+                "stage": "review",
+                "message": "审查完成，无需修订",
+                "progress": 100,
+            }
+    except Exception as e:
+        logger.warning("Review agent failed, using unreviewed version: %s", e)
+        yield {
+            "event": "stage",
+            "stage": "review",
+            "message": f"审查跳过（{e}）",
+            "progress": 100,
+        }
+
     yield {
         "event": "done",
         "content": cleaned,
-        "message": f"生成完成：{total_chapters} 章，基于 {total_docs} 篇文档（并行生成）",
+        "message": f"生成完成：{total_chapters} 章，基于 {total_docs} 篇文档",
     }
 
 
@@ -637,117 +784,6 @@ async def _pipeline_generate(
     documents: list[dict], template_id: str
 ) -> AsyncGenerator[str, None]:
     """Pipeline generation as plain text stream (backward compatible)."""
-    async for event in generate_latex_pipeline_internal(documents, template_id):
+    async for event in generate_latex_pipeline(documents, template_id):
         if event.get("event") == "chunk":
             yield event["content"]
-
-
-async def generate_latex_pipeline_internal(
-    documents: list[dict], template_id: str
-) -> AsyncGenerator[dict, None]:
-    """Internal pipeline without DB dependency."""
-    total_docs = len(documents)
-    template_rules = _get_template_rules(template_id)
-    doc_class = _detect_document_class(template_id)
-    section_commands = _get_section_commands(doc_class)
-    support_dirs = get_template_support_dirs(template_id)
-
-    # Stage 1: Analyze
-    analyses = []
-    batch_size = 10
-    for batch_start in range(0, total_docs, batch_size):
-        batch_end = min(batch_start + batch_size, total_docs)
-        batch = documents[batch_start:batch_end]
-        tasks = [
-            analyze_document(doc["filename"], doc["content"], batch_start + i + 1, total_docs)
-            for i, doc in enumerate(batch)
-        ]
-        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-        for i, result in enumerate(batch_results):
-            if isinstance(result, Exception):
-                analyses.append({
-                    "title": documents[batch_start + i]["filename"],
-                    "authors": [], "type": "其他", "key_topics": [],
-                    "sections": [{"heading": "全文", "summary": documents[batch_start + i]["content"][:500], "key_points": []}],
-                    "abstract": documents[batch_start + i]["content"][:300],
-                    "references": [], "importance": "中",
-                })
-            else:
-                analyses.append(result)
-
-    # Stage 2: Outline
-    outline = await plan_outline(analyses, template_id)
-
-    # Stage 3: Generate (parallel)
-    chapters = outline.get("chapters", [])
-    total_chapters = len(chapters)
-    preamble = _build_preamble_from_template(outline, template_id)
-    yield {"event": "chunk", "content": preamble}
-
-    # Prepare sources
-    chapter_sources = []
-    for chapter in chapters:
-        source_docs = []
-        for idx in chapter.get("source_docs", []):
-            if 1 <= idx <= total_docs:
-                source_docs.append({
-                    "filename": documents[idx - 1]["filename"],
-                    "content": documents[idx - 1]["content"],
-                    "analysis": analyses[idx - 1],
-                })
-        chapter_sources.append(source_docs)
-
-    # Parallel batch generation
-    chapter_batch_size = 8
-    for batch_start in range(0, total_chapters, chapter_batch_size):
-        batch_end = min(batch_start + chapter_batch_size, total_chapters)
-        tasks = [
-            generate_chapter(
-                doc_title=outline.get("title", ""),
-                chapter=chapters[ch_idx],
-                chapter_index=ch_idx + 1,
-                total_chapters=total_chapters,
-                source_documents=chapter_sources[ch_idx],
-                template_rules=template_rules,
-                section_commands=section_commands,
-            )
-            for ch_idx in range(batch_start, batch_end)
-        ]
-        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Extract content, then validate and fix in parallel
-        chapter_contents = []
-        for i, result in enumerate(batch_results):
-            ch_idx = batch_start + i
-            if isinstance(result, Exception):
-                chapter_contents.append(None)
-            else:
-                chapter_contents.append(extract_latex(result))
-
-        validate_tasks = []
-        validate_indices = []
-        for i, content in enumerate(chapter_contents):
-            if content is not None:
-                ch_idx = batch_start + i
-                validate_tasks.append(
-                    _validate_and_fix_chapter(
-                        preamble, content, ch_idx + 1,
-                        support_dirs=support_dirs or None,
-                    )
-                )
-                validate_indices.append(i)
-
-        if validate_tasks:
-            val_results = await asyncio.gather(*validate_tasks, return_exceptions=True)
-            for local_i, val_result in zip(validate_indices, val_results):
-                if not isinstance(val_result, Exception):
-                    fixed_content, was_fixed = val_result
-                    chapter_contents[local_i] = fixed_content
-
-        for i, content in enumerate(chapter_contents):
-            if content is None:
-                yield {"event": "chunk", "content": f"\n\n% Chapter generation failed: {batch_results[i]}\n"}
-            else:
-                yield {"event": "chunk", "content": "\n\n" + content}
-
-    yield {"event": "chunk", "content": "\n\n\\end{document}\n"}

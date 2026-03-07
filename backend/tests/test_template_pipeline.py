@@ -234,15 +234,15 @@ def test_section_commands_use_chapter_for_report():
     assert article_cmds["second"] == r"\subsection"
 
 
-def test_template_rules_contain_preamble_and_hierarchy():
-    """_get_template_rules 返回包含模板 preamble 和章节层级信息的字符串。"""
-    from app.services.generation_service import _get_template_rules
+def test_template_rules_contain_structured_info():
+    """_get_structured_template_rules 返回结构化的模板信息字符串。"""
+    from app.services.generation_service import _get_structured_template_rules
 
-    rules = _get_template_rules(CUSTOM_TEMPLATE_ID)
-    assert rules, "_get_template_rules 不应返回空字符串"
+    rules = _get_structured_template_rules(CUSTOM_TEMPLATE_ID)
+    assert rules, "_get_structured_template_rules 不应返回空字符串"
 
-    # 应包含 preamble 中的信息
-    assert r"\documentclass" in rules, "rules 应包含 \\documentclass"
+    # 应包含文档类型信息
+    assert "ctexrep" in rules, "rules 应包含文档类型 ctexrep"
     # 应包含章节层级信息
     assert r"\chapter" in rules, "rules 应包含 \\chapter 层级信息"
 
@@ -340,7 +340,7 @@ async def _mock_chat_stream(messages, temperature=0.7, max_tokens=16384):
 @pytest.mark.asyncio
 async def test_full_pipeline_generates_latex_using_template():
     """完整管线使用 custom 模板生成的 LaTeX 包含模板特征。"""
-    from app.services.generation_service import generate_latex_pipeline_internal
+    from app.services.generation_service import generate_latex_pipeline
 
     documents = [
         {"filename": "test.docx", "content": "这是一份测试文档内容，用于验证管线功能。" * 10},
@@ -352,7 +352,7 @@ async def test_full_pipeline_generates_latex_using_template():
 
         # 收集所有 chunk 事件
         chunks = []
-        async for event in generate_latex_pipeline_internal(documents, CUSTOM_TEMPLATE_ID):
+        async for event in generate_latex_pipeline(documents, CUSTOM_TEMPLATE_ID):
             if event.get("event") == "chunk":
                 chunks.append(event["content"])
 
@@ -376,7 +376,7 @@ async def test_full_pipeline_generates_latex_using_template():
 @pytest.mark.asyncio
 async def test_full_pipeline_with_default_template_uses_article():
     """使用 academic_paper 模板时，输出使用 article class 而非 report。"""
-    from app.services.generation_service import generate_latex_pipeline_internal
+    from app.services.generation_service import generate_latex_pipeline
 
     documents = [
         {"filename": "test.docx", "content": "这是一份测试文档内容，用于验证管线功能。" * 10},
@@ -392,7 +392,7 @@ async def test_full_pipeline_with_default_template_uses_article():
         mock_client.chat_stream = MagicMock(side_effect=_article_mock_stream)
 
         chunks = []
-        async for event in generate_latex_pipeline_internal(documents, ARTICLE_TEMPLATE_ID):
+        async for event in generate_latex_pipeline(documents, ARTICLE_TEMPLATE_ID):
             if event.get("event") == "chunk":
                 chunks.append(event["content"])
 
@@ -411,9 +411,9 @@ async def test_full_pipeline_with_default_template_uses_article():
 @pytest.mark.asyncio
 async def test_chapter_generation_receives_template_rules():
     """generate_chapter 的 prompt 中确实包含了模板的格式规则。"""
-    from app.services.generation_service import _get_template_rules, _get_section_commands
+    from app.services.generation_service import _get_structured_template_rules, _get_section_commands
 
-    template_rules = _get_template_rules(CUSTOM_TEMPLATE_ID)
+    template_rules = _get_structured_template_rules(CUSTOM_TEMPLATE_ID)
     section_commands = _get_section_commands("report")
 
     captured_messages = []
@@ -433,7 +433,7 @@ async def test_chapter_generation_receives_template_rules():
             chapter={"chapter_id": 1, "title": "第一章", "description": "测试", "subsections": []},
             chapter_index=1,
             total_chapters=1,
-            source_documents=[{"filename": "test.docx", "content": "测试内容", "analysis": {}}],
+            source_documents=[{"filename": "test.docx", "content": "测试内容"}],
             template_rules=template_rules,
             section_commands=section_commands,
         )
@@ -442,7 +442,7 @@ async def test_chapter_generation_receives_template_rules():
 
     # 检查 prompt 内容
     prompt_content = captured_messages[0][0]["content"]
-    assert r"\documentclass" in prompt_content or "模板" in prompt_content, \
-        "prompt 应包含 documentclass 或模板相关内容"
+    assert "ctexrep" in prompt_content or "模板" in prompt_content, \
+        "prompt 应包含模板相关内容"
     assert r"\chapter" in prompt_content, \
         "prompt 应包含 \\chapter 作为章节命令"

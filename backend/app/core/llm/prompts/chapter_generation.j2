@@ -13,24 +13,28 @@
 {% endfor %}
 {% endif %}
 
+{% if outline_summary %}
+## 全文大纲概览
+以下是全文各章节的大纲，标记了当前章节的位置。请据此把握全局，避免与其他章节内容重复。
+
+{{ outline_summary }}
+
+### 协调指令
+- 不要重复其他章节已覆盖的内容，如有交叉引用需求可简要提及"详见第X章"
+- 保持全文术语一致：同一概念在各章节使用相同的术语和缩写
+- 只引用本章内定义的 label（fig:ch{{ chapter_index }}_xxx、tab:ch{{ chapter_index }}_xxx），不要引用其他章节的 label
+{% endif %}
+
 ## 源文档内容
-以下是该章节对应的源文档分析和原文，请尽可能完整地保留源文档中的关键数据、技术参数、结论等实质性内容，不要概括或省略重要细节：
+以下是该章节对应的源文档原文，请尽可能完整地保留源文档中的关键数据、技术参数、结论等实质性内容，不要概括或省略重要细节：
 
 注意：原文中 [IMAGE: ...] 标记表示源文档中的图片及其内容描述，请按照 LaTeX 代码规范第 13 条处理。
 
 {% for doc in source_documents %}
 ### 源文档 {{ loop.index }}：{{ doc.filename }}
-**分析摘要：** {{ doc.analysis.abstract }}
-
-**相关章节原文：**
-{% for sec in doc.analysis.sections %}
-#### {{ sec.heading }}
-{{ sec.summary }}
-要点：{{ sec.key_points | join('；') }}
-{% endfor %}
 
 **原文内容：**
-{{ doc.content[:15000] }}
+{{ doc.content[:20000] }}
 {% endfor %}
 
 {% if template_rules %}

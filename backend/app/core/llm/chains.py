@@ -255,13 +255,14 @@ async def analyze_document(
     return _merge_chunk_analyses(list(results), filename)
 
 
-async def plan_outline(analyses: list[dict], template_id: str) -> dict:
+async def plan_outline(analyses: list[dict], template_id: str, template_structure: dict | None = None) -> dict:
     """Plan document outline from all document analyses."""
     prompt = _render_prompt(
         "outline_planning.j2",
         analyses=analyses,
         total_docs=len(analyses),
         template_id=template_id,
+        template_structure=template_structure or {},
     )
     messages = [{"role": "user", "content": prompt}]
     response = await doubao_client.chat(messages, temperature=0.3, max_tokens=8192)
@@ -294,6 +295,7 @@ async def generate_chapter_stream(
     source_documents: list[dict],
     template_rules: str = "",
     section_commands: dict | None = None,
+    outline_summary: str = "",
 ) -> AsyncGenerator[str, None]:
     """Stream generate LaTeX for a single chapter."""
     if section_commands is None:
@@ -312,6 +314,7 @@ async def generate_chapter_stream(
         source_documents=source_documents,
         template_rules=template_rules,
         section_commands=section_commands,
+        outline_summary=outline_summary,
     )
     messages = [{"role": "user", "content": prompt}]
     async for chunk in doubao_client.chat_stream(messages, temperature=0.3):
@@ -326,6 +329,7 @@ async def generate_chapter(
     source_documents: list[dict],
     template_rules: str = "",
     section_commands: dict | None = None,
+    outline_summary: str = "",
 ) -> str:
     """Non-streaming chapter generation (for parallel execution)."""
     content = ""
@@ -333,6 +337,7 @@ async def generate_chapter(
         doc_title, chapter, chapter_index, total_chapters, source_documents,
         template_rules=template_rules,
         section_commands=section_commands,
+        outline_summary=outline_summary,
     ):
         content += chunk
     return content

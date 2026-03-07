@@ -8,9 +8,11 @@ from app.api.schemas.schemas import GenerateRequest
 from app.dependencies import get_db, get_project
 from app.models.models import Project
 from app.core.llm.output_parsers import extract_latex
+from app.config import settings
 from app.services.generation_service import (
     generate_latex_from_documents,
     generate_latex_pipeline,
+    _gather_documents,
 )
 from app.core.fonts import remap_cjk_fonts
 from app.services import project_service
@@ -30,8 +32,11 @@ async def generate_latex(
     async def event_stream():
         full_content = ""
         try:
+            documents = await _gather_documents(db, project.id, data.document_ids)
+            images_dir = settings.storage_path / project.id / "images"
             async for event in generate_latex_pipeline(
-                db, project.id, template_id, data.document_ids
+                documents, template_id,
+                project_images_dir=images_dir if images_dir.is_dir() else None,
             ):
                 evt_type = event.get("event", "")
 
