@@ -16,6 +16,7 @@ from app.core.compiler.error_parser import parse_xelatex_log
 from app.core.compiler.synctex import forward_sync, inverse_sync, build_line_map
 from app.core.compiler.word_preprocessor import preprocess_latex_for_word
 from app.core.compiler.latex2docx import convert_latex_to_docx
+from app.core.fonts import remap_cjk_fonts
 from app.core.llm.fix_agent import run_fix_agent_loop
 from app.core.templates.registry import get_template_support_dirs
 from app.dependencies import get_db, get_project
@@ -98,6 +99,7 @@ async def compile_and_fix(
             if result.success:
                 # Save fixed LaTeX back to project if it was modified
                 if current_latex != latex_content:
+                    current_latex = remap_cjk_fonts(current_latex)
                     await project_service.update_project(
                         db, project, latex_content=current_latex
                     )

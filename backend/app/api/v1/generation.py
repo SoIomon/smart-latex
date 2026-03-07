@@ -12,6 +12,7 @@ from app.services.generation_service import (
     generate_latex_from_documents,
     generate_latex_pipeline,
 )
+from app.core.fonts import remap_cjk_fonts
 from app.services import project_service
 
 router = APIRouter(tags=["generation"])
@@ -64,6 +65,7 @@ async def generate_latex(
 
                 elif evt_type == "done":
                     cleaned = event.get("content", extract_latex(full_content))
+                    cleaned = remap_cjk_fonts(cleaned)
                     await project_service.update_project(
                         db, project, latex_content=cleaned, template_id=template_id
                     )

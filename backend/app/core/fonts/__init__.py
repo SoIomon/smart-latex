@@ -179,6 +179,69 @@ def resolve_cjk_font_name(name: str) -> str:
     return getattr(fonts, role, name)
 
 
+def remap_cjk_fonts(content: str) -> str:
+    """Replace hardcoded CJK font names in LaTeX source with the current platform's fonts.
+
+    Scans ``\\setCJKmainfont``, ``\\setCJKsansfont``, ``\\newCJKfontfamily`` etc.
+    and remaps any known cross-platform CJK font name to the value returned by
+    ``get_cjk_fonts()`` for the current environment.  Idempotent — safe to call
+    multiple times.
+    """
+    import re
+
+    cjk = get_cjk_fonts()
+    current = {
+        "songti": cjk.songti,
+        "heiti": cjk.heiti,
+        "kaiti": cjk.kaiti,
+        "fangsong": cjk.fangsong,
+    }
+
+    # Collect all concrete font names from every platform → role mapping
+    name_to_role: dict[str, str] = {}
+    for fonts in _FONT_MAPS.values():
+        for role, name in fonts.items():
+            name_to_role[name] = role
+
+    # Build old→new replacement pairs (skip no-ops)
+    replacements: dict[str, str] = {}
+    for name, role in name_to_role.items():
+        target = current[role]
+        if name != target:
+            replacements[name] = target
+
+    if not replacements:
+        return content
+
+    # Only replace font names inside CJK font commands to avoid false positives.
+    cjk_cmd_pattern = re.compile(
+        r'(\\(?:setCJK(?:main|sans|mono)font|newCJKfontfamily\s*\\[a-z]+|setCJKfamilyfont\s*\{[^}]*\})'
+        r'(?:\s*\[[^\]]*\])?\s*\{)([^}]+)(\})'
+    )
+
+    def replace_in_cmd(m: re.Match) -> str:
+        prefix, font_name, suffix = m.group(1), m.group(2), m.group(3)
+        new_name = replacements.get(font_name.strip(), font_name)
+        return f"{prefix}{new_name}{suffix}"
+
+    content = cjk_cmd_pattern.sub(replace_in_cmd, content)
+
+    # Also replace font names inside [...] options (e.g. BoldFont=Heiti SC)
+    for old_name, new_name in replacements.items():
+        content = re.sub(
+            r'(BoldFont\s*=\s*)' + re.escape(old_name),
+            r'\1' + new_name,
+            content,
+        )
+        content = re.sub(
+            r'(ItalicFont\s*=\s*)' + re.escape(old_name),
+            r'\1' + new_name,
+            content,
+        )
+
+    return content
+
+
 def get_bundled_fonts_dir() -> Path:
     """Return the path to the bundled fonts directory."""
     return BUNDLED_FONTS_DIR

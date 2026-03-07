@@ -131,6 +131,9 @@ def _fix_common_latex_issues(content: str) -> str:
         content,
     )
 
+    # Replace CJK font names with current platform's available fonts
+    content = _remap_cjk_fonts(content)
+
     # Auto-inject missing packages that LLM-generated content commonly needs
     content = _inject_missing_packages(content)
 
@@ -141,6 +144,12 @@ def _fix_common_latex_issues(content: str) -> str:
     content = _fix_truncated_latex(content)
 
     return content
+
+
+def _remap_cjk_fonts(content: str) -> str:
+    """Delegate to the shared ``remap_cjk_fonts`` in the fonts package."""
+    from app.core.fonts import remap_cjk_fonts
+    return remap_cjk_fonts(content)
 
 
 def _inject_missing_packages(content: str) -> str:
