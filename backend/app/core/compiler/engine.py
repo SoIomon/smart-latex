@@ -134,6 +134,10 @@ def _fix_common_latex_issues(content: str) -> str:
     # Replace CJK font names with current platform's available fonts
     content = _remap_cjk_fonts(content)
 
+    # When using bundled FandolFonts as fallback, rewrite font commands to use
+    # Path=./ so fontspec loads them from the build dir (MiKTeX ignores OSFONTDIR)
+    content = _rewrite_fandol_with_path(content)
+
     # Auto-inject missing packages that LLM-generated content commonly needs
     content = _inject_missing_packages(content)
 
@@ -150,6 +154,80 @@ def _remap_cjk_fonts(content: str) -> str:
     """Delegate to the shared ``remap_cjk_fonts`` in the fonts package."""
     from app.core.fonts import remap_cjk_fonts
     return remap_cjk_fonts(content)
+
+
+# Fandol family name → (regular filename, bold filename or None)
+_FANDOL_FILES: dict[str, tuple[str, str | None]] = {
+    "FandolSong": ("FandolSong-Regular.otf", "FandolSong-Bold.otf"),
+    "FandolHei": ("FandolHei-Regular.otf", "FandolHei-Bold.otf"),
+    "FandolKai": ("FandolKai-Regular.otf", None),
+    "FandolFang": ("FandolFang-Regular.otf", None),
+}
+
+
+def _rewrite_fandol_with_path(content: str) -> str:
+    """Add ``Path=./`` to Fandol font commands for MiKTeX compatibility.
+
+    MiKTeX ignores the ``OSFONTDIR`` env var (a kpathsea / TeX Live feature),
+    so bundled FandolFonts copied to the build directory must be loaded via
+    fontspec's ``Path`` option.  Only rewrites when the current platform is
+    using FandolFonts as fallback.
+    """
+    from app.core.fonts import get_cjk_fonts
+
+    if not get_cjk_fonts().is_fallback:
+        return content
+
+    pattern = re.compile(
+        r'(\\(?:setCJK(?:main|sans|mono)font'
+        r'|newCJKfontfamily\s*\\[a-zA-Z]+'
+        r'|setCJKfamilyfont\s*\{[^}]*\}))'
+        r'(?:\s*\[([^\]]*)\])?\s*\{(Fandol(?:Song|Hei|Kai|Fang))\}'
+    )
+
+    def _rewrite(m: re.Match) -> str:
+        cmd, options, family = m.group(1), m.group(2) or "", m.group(3)
+        files = _FANDOL_FILES.get(family)
+        if not files or "Path=" in options:
+            return m.group(0)
+
+        regular, bold = files
+        new_parts = ["Path=./"]
+
+        if options:
+            # Replace Fandol family names in BoldFont= with bold filenames
+            for fam, (reg, bld) in _FANDOL_FILES.items():
+                options = re.sub(
+                    r'(BoldFont\s*=\s*)' + re.escape(fam),
+                    r'\g<1>' + (bld or reg), options,
+                )
+            # Add BoldFont if not already specified and bold variant exists
+            if bold and "BoldFont" not in options:
+                new_parts.append(f"BoldFont={bold}")
+            new_parts.append(options)
+        elif bold:
+            new_parts.append(f"BoldFont={bold}")
+
+        return f"{cmd}[{','.join(new_parts)}]{{{regular}}}"
+
+    return pattern.sub(_rewrite, content)
+
+
+def _ensure_bundled_fonts(build_dir: Path) -> None:
+    """Copy bundled FandolFonts to *build_dir* when the platform uses them."""
+    from app.core.fonts import get_cjk_fonts, get_bundled_fonts_dir
+
+    if not get_cjk_fonts().is_fallback:
+        return
+
+    bundled = get_bundled_fonts_dir()
+    if not bundled.is_dir():
+        return
+
+    for otf in bundled.glob("*.otf"):
+        dest = build_dir / otf.name
+        if not dest.exists():
+            shutil.copy2(otf, dest)
 
 
 def _inject_missing_packages(content: str) -> str:
@@ -349,6 +427,7 @@ async def compile_latex(
     output_dir.mkdir(parents=True, exist_ok=True)
     if support_dirs:
         _copy_support_dirs(support_dirs, output_dir)
+    _ensure_bundled_fonts(output_dir)
     original_content = latex_content
     latex_content = _fix_common_latex_issues(latex_content)
 
@@ -459,6 +538,7 @@ async def validate_latex_syntax(
     try:
         if support_dirs:
             _copy_support_dirs(support_dirs, work_dir)
+        _ensure_bundled_fonts(work_dir)
         latex_content = _fix_common_latex_issues(latex_content)
         tex_path = work_dir / "validate.tex"
         tex_path.write_text(latex_content, encoding="utf-8")
