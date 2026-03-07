@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -7,6 +9,8 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class DoubaoClient:
@@ -33,15 +37,29 @@ class DoubaoClient:
 
     async def chat(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 16384) -> str:
         """Non-streaming chat completion."""
+        prompt_preview = (messages[-1].get("content", "") or "")[:80]
+        input_chars = sum(len(m.get("content", "") or "") for m in messages)
+        t0 = time.monotonic()
         response = await self._client.chat.completions.create(
             model=self._model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        elapsed = time.monotonic() - t0
         if not response.choices:
+            logger.info("LLM chat %.1fs | input=%d chars | empty response | prompt: %s…", elapsed, input_chars, prompt_preview)
             return ""
-        return response.choices[0].message.content or ""
+        output = response.choices[0].message.content or ""
+        usage = response.usage
+        logger.info(
+            "LLM chat %.1fs | input=%d chars output=%d chars | tokens: %s→%s | prompt: %s…",
+            elapsed, input_chars, len(output),
+            usage.prompt_tokens if usage else "?",
+            usage.completion_tokens if usage else "?",
+            prompt_preview,
+        )
+        return output
 
     async def chat_with_tools(
         self,
@@ -55,12 +73,22 @@ class DoubaoClient:
         Returns the full ChatCompletion object so the caller can inspect
         tool_calls on the response message.
         """
+        input_chars = sum(len(m.get("content", "") or "") for m in messages)
+        t0 = time.monotonic()
         response = await self._client.chat.completions.create(
             model=self._model,
             messages=messages,
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
+        )
+        elapsed = time.monotonic() - t0
+        usage = response.usage
+        logger.info(
+            "LLM tool_call %.1fs | input=%d chars | tokens: %s→%s",
+            elapsed, input_chars,
+            usage.prompt_tokens if usage else "?",
+            usage.completion_tokens if usage else "?",
         )
         return response
 

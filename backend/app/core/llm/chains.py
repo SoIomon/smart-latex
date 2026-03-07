@@ -120,6 +120,7 @@ async def _analyze_chunk(
     filename: str, chunk: str, chunk_index: int, total_chunks: int
 ) -> dict:
     """Analyze a single chunk of a document using the same LLM prompt."""
+    logger.info("Analyzing '%s' chunk %d/%d (%d chars)", filename, chunk_index, total_chunks, len(chunk))
     prompt = _render_prompt(
         "document_analysis.j2",
         filename=filename,
@@ -128,7 +129,7 @@ async def _analyze_chunk(
         total_docs=total_chunks,
     )
     messages = [{"role": "user", "content": prompt}]
-    response = await doubao_client.chat(messages, temperature=0.2, max_tokens=8192)
+    response = await doubao_client.chat(messages, temperature=0.2, max_tokens=16384)
     result = extract_json(response)
     if not result:
         result = {
@@ -236,7 +237,7 @@ async def analyze_document(
     For long documents (>12000 chars), splits into chunks, analyzes each
     concurrently, and merges the results so no content is lost.
     """
-    chunks = _split_into_chunks(content, max_chars=12000)
+    chunks = _split_into_chunks(content, max_chars=50000)
 
     if len(chunks) == 1:
         # Short document: single-pass analysis (original path)
@@ -263,7 +264,7 @@ async def plan_outline(analyses: list[dict], template_id: str) -> dict:
         template_id=template_id,
     )
     messages = [{"role": "user", "content": prompt}]
-    response = await doubao_client.chat(messages, temperature=0.3, max_tokens=4096)
+    response = await doubao_client.chat(messages, temperature=0.3, max_tokens=8192)
     result = extract_json(response)
     if not result or "chapters" not in result:
         # Fallback: single chapter with all docs
