@@ -15,12 +15,20 @@
 - 特殊字符未转义（如 % # & _ 等）
 - Extra alignment tab / Misplaced \noalign（表格结构错误）
 - Runaway argument / Paragraph ended before（缺少闭合括号）
+- Unable to load picture or PDF file（图片文件不存在）
 
 ## 不可修复的环境错误（必须调用 report_unfixable）
 - 字体找不到（如 "SimSun"、"SimHei"、"KaiTi"、"STSong"、"Heiti SC" cannot be found — 这类错误由系统字体配置决定，非 LaTeX 代码问题）
 - TeX 包未安装（xxx.sty not found）
 - TFM 文件缺失
 - 系统权限/路径问题
+
+## 图片文件缺失的修复方法
+当遇到 "Unable to load picture or PDF file" 错误时：
+1. 先调用 list_available_images() 查看项目中实际可用的图片文件
+2. 用 get_error_context() 或 search_text("includegraphics") 找到引用了不存在图片的代码行
+3. 如果有可用图片，将错误的文件名替换为最匹配的实际文件名
+4. 如果没有可用图片，注释掉整个 figure 环境（从 \begin{figure} 到 \end{figure}）
 
 ## 重要规则
 - 只修复编译错误，不改变文档内容和结构

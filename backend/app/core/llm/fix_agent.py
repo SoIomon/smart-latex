@@ -46,6 +46,7 @@ class FixAgentState:
 
     doc: DocumentState
     errors: list[ParsedError]
+    available_images: list[str] = field(default_factory=list)
     unfixable: bool = False
     unfixable_reason: str = ""
 
@@ -59,6 +60,17 @@ def report_unfixable(state: FixAgentState, reason: str) -> str:
     state.unfixable = True
     state.unfixable_reason = reason
     return f"已标记为不可修复: {reason}"
+
+
+def list_available_images(state: FixAgentState) -> str:
+    """List all available image files in the project's images directory."""
+    if not state.available_images:
+        return "当前项目没有可用的图片文件。如果文档引用了图片，请将 \\includegraphics 命令注释掉或删除对应的 figure 环境。"
+    lines = [f"项目中共有 {len(state.available_images)} 张可用图片："]
+    for fn in state.available_images:
+        lines.append(f"  - images/{fn}")
+    lines.append("\n注意：\\includegraphics 路径必须使用上述文件名（含 images/ 前缀）。")
+    return "\n".join(lines)
 
 
 def get_error_context(
@@ -190,6 +202,18 @@ FIX_TOOL_DEFINITIONS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_available_images",
+            "description": (
+                "列出当前项目中所有可用的图片文件。"
+                "当遇到 'Unable to load picture or PDF file' 错误时，"
+                "用此工具查看实际可用的图片文件名，然后修正 \\includegraphics 中的路径。"
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
@@ -228,6 +252,8 @@ def _execute_fix_tool(name: str, args: dict, state: FixAgentState) -> str:
             error_index=args.get("error_index", 0),
             context_lines=args.get("context_lines", 5),
         )
+    elif name == "list_available_images":
+        return list_available_images(state)
     else:
         return f"未知工具: {name}"
 
@@ -263,6 +289,8 @@ def _format_tool_call(name: str, args: dict) -> str:
         return f"report_unfixable(reason='{args.get('reason', '')[:50]}')"
     elif name == "get_error_context":
         return f"get_error_context(#{args.get('error_index')})"
+    elif name == "list_available_images":
+        return "list_available_images()"
     return f"{name}({json.dumps(args, ensure_ascii=False)})"
 
 
@@ -274,6 +302,7 @@ async def run_fix_agent_loop(
     latex_content: str,
     parsed_errors: list[ParsedError],
     max_turns: int = MAX_FIX_TURNS,
+    available_images: list[str] | None = None,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the fix agent loop, yielding AgentEvents for SSE streaming.
 
@@ -283,10 +312,13 @@ async def run_fix_agent_loop(
         The current full LaTeX document content.
     parsed_errors : list[ParsedError]
         Structured errors parsed from the xelatex log.
+    available_images : list[str] | None
+        Image filenames available in the project's images directory.
     """
     state = FixAgentState(
         doc=DocumentState.from_latex(latex_content),
         errors=parsed_errors,
+        available_images=available_images or [],
     )
 
     system_prompt = _load_system_prompt()
@@ -410,13 +442,17 @@ async def fix_latex_content(
     latex_content: str,
     parsed_errors: list[ParsedError],
     max_turns: int = 5,
+    available_images: list[str] | None = None,
 ) -> str | None:
     """Run fix agent and return fixed content directly (non-streaming).
 
     Returns the fixed LaTeX content, or None if unfixable/unchanged.
     """
     result = None
-    async for event in run_fix_agent_loop(latex_content, parsed_errors, max_turns=max_turns):
+    async for event in run_fix_agent_loop(
+        latex_content, parsed_errors, max_turns=max_turns,
+        available_images=available_images,
+    ):
         if event.type == "latex":
             result = event.data
         elif event.type == "unfixable":

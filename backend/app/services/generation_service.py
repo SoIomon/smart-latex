@@ -436,8 +436,22 @@ async def _validate_and_fix_chapter(
         + "\\end{document}\n"
     )
 
+    # Collect available images from support_dirs for the fix agent
+    available_images: list[str] = []
+    if support_dirs:
+        for sd in support_dirs:
+            if sd.name == "images" and sd.is_dir():
+                available_images = [
+                    f.name for f in sd.iterdir()
+                    if f.is_file() and f.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".pdf"}
+                ]
+                break
+
     try:
-        fixed_doc = await fix_latex_content(marked_doc, parsed_errors, max_turns=5)
+        fixed_doc = await fix_latex_content(
+            marked_doc, parsed_errors, max_turns=5,
+            available_images=available_images,
+        )
     except Exception as e:
         logger.warning("Chapter %d: fix agent failed: %s", chapter_index, e)
         return chapter_content, was_stripped
