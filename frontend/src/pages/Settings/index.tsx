@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Card, Form, Input, Button, message, Space, Typography, Spin, Alert, Tag, Collapse } from 'antd';
-import { SaveOutlined, ApiOutlined, MedicineBoxOutlined, CheckCircleOutlined, WarningOutlined, CloseCircleOutlined, DownloadOutlined } from '@ant-design/icons';
+import { SaveOutlined, ApiOutlined, MedicineBoxOutlined, CheckCircleOutlined, WarningOutlined, CloseCircleOutlined, DownloadOutlined, CopyOutlined } from '@ant-design/icons';
 import { getLLMConfig, updateLLMConfig, testLLMConnection, runDiagnostics, installFonts } from '../../api/settings';
 import type { DiagnosticItem, DiagnosticsResult } from '../../api/settings';
 
@@ -110,6 +110,32 @@ export default function Settings() {
     } finally {
       setFontInstalling(false);
     }
+  };
+
+  const buildDiagReport = () => {
+    if (!diagResult) return '';
+    const statusMark = (s: string) => s === 'ok' ? '✓' : s === 'warning' ? '⚠' : '✗';
+    const lines = [
+      `Smart-LaTeX 环境检测报告`,
+      `平台: ${diagResult.platform}`,
+      `时间: ${new Date().toLocaleString()}`,
+      '---',
+      ...diagResult.items.map(i => {
+        let line = `${statusMark(i.status)} ${i.name}: ${i.message}`;
+        if (i.suggestion) line += `\n  建议: ${i.suggestion}`;
+        if (i.detail) line += `\n  日志:\n${i.detail.split('\n').map(l => '    ' + l).join('\n')}`;
+        return line;
+      }),
+    ];
+    return lines.join('\n');
+  };
+
+  const handleCopyReport = () => {
+    const report = buildDiagReport();
+    navigator.clipboard.writeText(report).then(
+      () => message.success('报告已复制到剪贴板'),
+      () => message.error('复制失败'),
+    );
   };
 
   const statusIcon = (status: DiagnosticItem['status']) => {
@@ -241,20 +267,28 @@ export default function Settings() {
                       {statusTag(item.status)}
                     </div>
                     <Text type="secondary" style={{ fontSize: 13 }}>{item.message}</Text>
-                    {item.suggestion && (
+                    {(item.suggestion || item.detail) && (
                       <Collapse
                         ghost
                         size="small"
                         items={[{
                           key: '1',
-                          label: <Text type="secondary" style={{ fontSize: 12 }}>查看建议</Text>,
+                          label: <Text type="secondary" style={{ fontSize: 12 }}>查看详情</Text>,
                           children: (
-                            <Text
-                              style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}
-                              copyable
-                            >
-                              {item.suggestion}
-                            </Text>
+                            <>
+                              {item.suggestion && (
+                                <Text style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>{item.suggestion}</Text>
+                              )}
+                              {item.detail && (
+                                <pre style={{
+                                  fontSize: 11, background: '#f5f5f5', padding: 8,
+                                  borderRadius: 4, marginTop: 4, maxHeight: 200,
+                                  overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                                }}>
+                                  {item.detail}
+                                </pre>
+                              )}
+                            </>
                           ),
                         }]}
                         style={{ marginTop: 4, marginLeft: -16 }}
@@ -281,6 +315,11 @@ export default function Settings() {
                 style={{ marginTop: 12 }}
               />
             )}
+            <div style={{ marginTop: 12, textAlign: 'right' }}>
+              <Button size="small" icon={<CopyOutlined />} onClick={handleCopyReport}>
+                复制检测报告
+              </Button>
+            </div>
           </div>
         )}
       </Card>

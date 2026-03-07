@@ -1,6 +1,10 @@
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+# Anchor paths to backend/ so they're stable regardless of working directory.
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
@@ -18,6 +22,21 @@ class Settings(BaseSettings):
 
     LOG_LEVEL: str = "DEBUG"
     LOG_FILE: str = "logs/smart_latex.log"
+
+    @model_validator(mode="after")
+    def _resolve_relative_paths(self) -> "Settings":
+        """Resolve relative STORAGE_DIR / DATABASE_URL to backend/ directory."""
+        storage = Path(self.STORAGE_DIR)
+        if not storage.is_absolute():
+            self.STORAGE_DIR = str(_BACKEND_DIR / storage)
+
+        prefix = "sqlite+aiosqlite:///"
+        if self.DATABASE_URL.startswith(prefix):
+            db_path = Path(self.DATABASE_URL[len(prefix):])
+            if not db_path.is_absolute():
+                self.DATABASE_URL = prefix + str(_BACKEND_DIR / db_path)
+
+        return self
 
     @property
     def storage_path(self) -> Path:

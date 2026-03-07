@@ -119,6 +119,7 @@ class DiagnosticItem(BaseModel):
     status: str  # "ok" | "warning" | "error"
     message: str
     suggestion: str = ""
+    detail: str = ""  # raw error output for debugging
 
 
 class DiagnosticsResponse(BaseModel):
@@ -138,8 +139,8 @@ async def _check_command(cmd: str, args: list[str], env: dict) -> tuple[bool, st
         return False, ""
 
 
-async def _check_font(font_name: str, env: dict) -> bool:
-    """Check if a font is available via fc-list (Unix) or fontspec test compile."""
+async def _check_font(font_name: str, env: dict) -> tuple[bool, str]:
+    """Check if a font is available. Returns (ok, error_detail)."""
     if platform.system() == "Windows":
         # On Windows, try a minimal xelatex compile to test the font
         import tempfile
@@ -149,26 +150,37 @@ async def _check_font(font_name: str, env: dict) -> bool:
             tex = f"\\documentclass{{article}}\\usepackage{{fontspec}}\\setmainfont{{{font_name}}}\\begin{{document}}x\\end{{document}}"
             tex_path = work_dir / "test.tex"
             tex_path.write_text(tex, encoding="utf-8")
-            returncode, _, _ = await _run_subprocess(
+            returncode, stdout, stderr = await _run_subprocess(
                 ["xelatex", "-draftmode", "-interaction=nonstopmode",
                  "-halt-on-error", "test.tex"],
                 cwd=str(work_dir), env=env, timeout=15,
             )
-            return returncode == 0
-        except (FileNotFoundError, asyncio.TimeoutError):
-            return False
+            if returncode == 0:
+                return True, ""
+            # Extract error lines from xelatex output
+            output = stdout + stderr
+            err_lines = [l for l in output.split("\n") if l.strip().startswith("!")]
+            return False, "\n".join(err_lines[:5]) if err_lines else output[-500:]
+        except FileNotFoundError:
+            return False, "xelatex not found in PATH"
+        except asyncio.TimeoutError:
+            return False, "font check timed out (15s)"
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
     else:
         # Unix: use fc-list
         try:
-            returncode, stdout, _ = await _run_subprocess(
+            returncode, stdout, stderr = await _run_subprocess(
                 ["fc-list", f":family={font_name}", "family"],
                 cwd=".", env=env, timeout=5,
             )
-            return returncode == 0 and bool(stdout.strip())
-        except (FileNotFoundError, asyncio.TimeoutError):
-            return False
+            if returncode == 0 and stdout.strip():
+                return True, ""
+            return False, f"fc-list returned no match for '{font_name}'"
+        except FileNotFoundError:
+            return False, "fc-list not found (fontconfig not installed?)"
+        except asyncio.TimeoutError:
+            return False, "fc-list timed out (5s)"
 
 
 @router.get("/diagnostics", response_model=DiagnosticsResponse)
@@ -251,7 +263,7 @@ async def run_diagnostics():
     is_fallback = fonts.is_fallback
     _fandol_names = {"FandolSong", "FandolHei", "FandolKai", "FandolFang"}
     all_fonts_ok = True
-    for (role, font_name), available in zip(font_roles, font_checks):
+    for (role, font_name), (available, font_detail) in zip(font_roles, font_checks):
         if available:
             suffix = "（内置 Fandol 字体）" if font_name in _fandol_names else ""
             items.append(DiagnosticItem(
@@ -266,6 +278,7 @@ async def run_diagnostics():
                 status="warning",
                 message=f"未检测到 {font_name}",
                 suggestion="点击下方「安装内置字体」可一键安装 FandolFonts 开源中文字体",
+                detail=font_detail,
             ))
 
     if not all_fonts_ok:
@@ -307,12 +320,14 @@ async def run_diagnostics():
                     message="基础 LaTeX 编译测试通过",
                 ))
             else:
-                err_lines = [l for l in (stdout + stderr).split("\n") if l.strip().startswith("!")]
+                output = stdout + stderr
+                err_lines = [l for l in output.split("\n") if l.strip().startswith("!")]
                 items.append(DiagnosticItem(
                     name="编译测试",
                     status="error",
                     message="基础编译测试失败" + (f": {err_lines[0]}" if err_lines else ""),
                     suggestion="TeX 发行版可能不完整，请检查安装或尝试更新: tlmgr update --all",
+                    detail=output[-2000:],
                 ))
         except asyncio.TimeoutError:
             items.append(DiagnosticItem(

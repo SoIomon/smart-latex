@@ -29,6 +29,7 @@ export interface DiagnosticItem {
   status: 'ok' | 'warning' | 'error';
   message: string;
   suggestion: string;
+  detail: string;
 }
 
 export interface DiagnosticsResult {
