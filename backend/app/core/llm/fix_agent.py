@@ -359,6 +359,7 @@ async def run_fix_agent_loop(
             return
 
         # --- Process tool calls ---
+        has_replaced = False
         for tc in assistant_msg.tool_calls:
             fn_name = tc.function.name
             try:
@@ -369,12 +370,21 @@ async def run_fix_agent_loop(
             call_summary = _format_tool_call(fn_name, fn_args)
             yield AgentEvent(type="tool_call", data=call_summary)
 
+            # Skip additional replace_lines after the first one (line numbers shift)
+            if fn_name == "replace_lines" and has_replaced:
+                result = "已跳过：每轮只能执行一次 replace_lines（替换会改变行号），请重新用 read_lines 确认新行号后再替换"
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+                continue
+
             # Execute
             try:
                 result = _execute_fix_tool(fn_name, fn_args, state)
             except Exception as e:
                 logger.exception("Fix tool execution failed: %s", fn_name)
                 result = f"工具执行出错: {e}"
+
+            if fn_name == "replace_lines":
+                has_replaced = True
 
             yield AgentEvent(type="tool_result", data=fn_name)
 

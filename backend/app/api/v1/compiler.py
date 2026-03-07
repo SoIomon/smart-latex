@@ -72,7 +72,7 @@ async def compile_and_fix(
     project: Project = Depends(get_project),
     db: AsyncSession = Depends(get_db),
 ):
-    """Compile LaTeX, auto-fix errors with agent + tools, retry up to 3 times. Returns SSE events."""
+    """Compile LaTeX, auto-fix errors with agent + tools, retry up to 2 times. Returns SSE events."""
     latex_content = (data and data.latex_content) or project.latex_content
     if not latex_content:
         raise HTTPException(status_code=400, detail="No LaTeX content to compile")
@@ -82,107 +82,47 @@ async def compile_and_fix(
 
     async def event_stream():
         current_latex = latex_content
-        for attempt in range(1, max_retries + 1):
-            yield {
-                "event": "status",
-                "data": json.dumps({
-                    "attempt": attempt,
-                    "message": f"第 {attempt} 次编译中...",
-                }),
-            }
-
-            output_dir = settings.storage_path / project.id / "output"
-            sandbox = create_sandbox(output_dir)
-            result = await compile_latex(current_latex, sandbox, support_dirs=support_dirs or None)
-            cleanup_sandbox(sandbox)
-
-            if result.success:
-                # Always remap CJK fonts for the current platform
-                current_latex = remap_cjk_fonts(current_latex)
-                # Save back to project if content was modified
-                if current_latex != latex_content:
-                    await project_service.update_project(
-                        db, project, latex_content=current_latex
-                    )
-                pdf_url = f"/api/v1/projects/{project.id}/pdf"
+        current_latex = remap_cjk_fonts(current_latex)
+        try:
+            for attempt in range(1, max_retries + 1):
                 yield {
-                    "event": "done",
+                    "event": "status",
                     "data": json.dumps({
-                        "success": True,
-                        "pdf_url": pdf_url,
-                        "latex_content": current_latex,
-                        "attempts": attempt,
-                        "message": f"编译成功（第 {attempt} 次）",
+                        "attempt": attempt,
+                        "message": f"第 {attempt} 次编译中...",
                     }),
                 }
-                return
 
-            # Compile failed — parse structured errors from log
-            parsed_errors = parse_xelatex_log(result.log)
+                output_dir = settings.storage_path / project.id / "output"
+                sandbox = create_sandbox(output_dir)
+                result = await compile_latex(current_latex, sandbox, support_dirs=support_dirs or None)
+                cleanup_sandbox(sandbox)
 
-            if attempt >= max_retries:
-                yield {
-                    "event": "done",
-                    "data": json.dumps({
-                        "success": False,
-                        "latex_content": current_latex,
-                        "attempts": attempt,
-                        "errors": result.errors,
-                        "message": f"编译失败，已重试 {max_retries} 次",
-                    }),
-                }
-                return
+                if result.success:
+                    # Always remap CJK fonts for the current platform
+                    current_latex = remap_cjk_fonts(current_latex)
+                    # Save back to project if content was modified
+                    if current_latex != latex_content:
+                        await project_service.update_project(
+                            db, project, latex_content=current_latex
+                        )
+                    pdf_url = f"/api/v1/projects/{project.id}/pdf"
+                    yield {
+                        "event": "done",
+                        "data": json.dumps({
+                            "success": True,
+                            "pdf_url": pdf_url,
+                            "latex_content": current_latex,
+                            "attempts": attempt,
+                            "message": f"编译成功（第 {attempt} 次）",
+                        }),
+                    }
+                    return
 
-            # Run fix agent
-            yield {
-                "event": "status",
-                "data": json.dumps({
-                    "attempt": attempt,
-                    "message": "编译失败，AI 正在分析编译错误...",
-                }),
-            }
+                # Compile failed — parse structured errors from log
+                parsed_errors = parse_xelatex_log(result.log)
 
-            try:
-                agent_fixed = False
-                async for event in run_fix_agent_loop(current_latex, parsed_errors):
-                    sse_event = _map_fix_agent_event(event, attempt)
-                    if sse_event is not None:
-                        yield sse_event
-
-                    # Capture the fixed latex from the agent
-                    if event.type == "latex":
-                        current_latex = event.data
-                        agent_fixed = True
-
-                    # Agent declared unfixable — stop retrying
-                    if event.type == "unfixable":
-                        yield {
-                            "event": "done",
-                            "data": json.dumps({
-                                "success": False,
-                                "latex_content": current_latex,
-                                "attempts": attempt,
-                                "errors": result.errors,
-                                "message": f"无法自动修复: {event.data}",
-                            }),
-                        }
-                        return
-
-                    # Agent errored out
-                    if event.type == "error":
-                        yield {
-                            "event": "done",
-                            "data": json.dumps({
-                                "success": False,
-                                "latex_content": current_latex,
-                                "attempts": attempt,
-                                "errors": result.errors,
-                                "message": f"AI 修正出错: {event.data}",
-                            }),
-                        }
-                        return
-
-                if not agent_fixed:
+                if attempt >= max_retries:
                     yield {
                         "event": "done",
                         "data": json.dumps({
@@ -190,24 +130,97 @@ async def compile_and_fix(
                             "latex_content": current_latex,
                             "attempts": attempt,
                             "errors": result.errors,
-                            "message": "AI 未能修正任何错误",
+                            "message": f"编译失败，已重试 {max_retries} 次",
                         }),
                     }
                     return
 
-            except Exception as e:
-                logger.exception("Fix agent error")
+                # Run fix agent
                 yield {
-                    "event": "done",
+                    "event": "status",
                     "data": json.dumps({
-                        "success": False,
-                        "latex_content": current_latex,
-                        "attempts": attempt,
-                        "errors": result.errors,
-                        "message": f"AI 修正出错: {str(e)}",
+                        "attempt": attempt,
+                        "message": "编译失败，AI 正在分析编译错误...",
                     }),
                 }
-                return
+
+                try:
+                    agent_fixed = False
+                    async for event in run_fix_agent_loop(current_latex, parsed_errors):
+                        sse_event = _map_fix_agent_event(event, attempt)
+                        if sse_event is not None:
+                            yield sse_event
+
+                        # Capture the fixed latex from the agent
+                        if event.type == "latex":
+                            current_latex = event.data
+                            agent_fixed = True
+
+                        # Agent declared unfixable — stop retrying
+                        if event.type == "unfixable":
+                            yield {
+                                "event": "done",
+                                "data": json.dumps({
+                                    "success": False,
+                                    "latex_content": current_latex,
+                                    "attempts": attempt,
+                                    "errors": result.errors,
+                                    "message": f"无法自动修复: {event.data}",
+                                }),
+                            }
+                            return
+
+                        # Agent errored out
+                        if event.type == "error":
+                            yield {
+                                "event": "done",
+                                "data": json.dumps({
+                                    "success": False,
+                                    "latex_content": current_latex,
+                                    "attempts": attempt,
+                                    "errors": result.errors,
+                                    "message": f"AI 修正出错: {event.data}",
+                                }),
+                            }
+                            return
+
+                    if not agent_fixed:
+                        yield {
+                            "event": "done",
+                            "data": json.dumps({
+                                "success": False,
+                                "latex_content": current_latex,
+                                "attempts": attempt,
+                                "errors": result.errors,
+                                "message": "AI 未能修正任何错误",
+                            }),
+                        }
+                        return
+
+                except Exception as e:
+                    logger.exception("Fix agent error")
+                    yield {
+                        "event": "done",
+                        "data": json.dumps({
+                            "success": False,
+                            "latex_content": current_latex,
+                            "attempts": attempt,
+                            "errors": result.errors,
+                            "message": f"AI 修正出错: {str(e)}",
+                        }),
+                    }
+                    return
+        except Exception as e:
+            logger.exception("compile-and-fix error")
+            yield {
+                "event": "done",
+                "data": json.dumps({
+                    "success": False,
+                    "latex_content": current_latex,
+                    "errors": [str(e)],
+                    "message": f"编译出错: {e}",
+                }),
+            }
 
     return EventSourceResponse(event_stream())
 

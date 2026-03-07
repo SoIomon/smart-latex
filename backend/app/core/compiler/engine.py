@@ -65,12 +65,6 @@ _UNICODE_REPLACEMENTS = {
     "←": r"$\leftarrow$",
     "↔": r"$\leftrightarrow$",
     "…": r"\ldots{}",
-    "—": r"---",
-    "–": r"--",
-    "'": "`",
-    "\u2019": "'",
-    "\u201c": "``",
-    "\u201d": "''",
 }
 
 
@@ -94,7 +88,7 @@ def _fix_common_latex_issues(content: str) -> str:
         r"\GHz": r"\mathrm{GHz}",
     }
     for cmd, repl in _UNDEFINED_COMMANDS.items():
-        content = content.replace(cmd, repl)
+        content = re.sub(re.escape(cmd) + r'(?![a-zA-Z])', lambda _: repl, content)
 
     # Fix enumitem shortlabel: \begin{enumerate}[a)] -> \begin{enumerate}[label=\alph*)]
     content = re.sub(
@@ -277,8 +271,22 @@ def _inject_missing_packages(content: str) -> str:
     return preamble.rstrip() + '\n' + inject_str + '\n' + body
 
 
+_DEDUP_SUFFIX = '__dup'
+
+
 def _dedup_labels(content: str) -> str:
-    """Detect duplicate \\label{} and auto-suffix to prevent LaTeX errors."""
+    """Detect duplicate \\label{} and auto-suffix to prevent LaTeX errors.
+
+    Uses a distinctive ``__dup`` suffix so that repeated calls are idempotent:
+    previous dedup suffixes are stripped before re-scanning.
+    """
+    # Strip previous dedup suffixes to make the function idempotent
+    content = re.sub(
+        r'\\label\{([^}]+?)' + re.escape(_DEDUP_SUFFIX) + r'\d+\}',
+        lambda m: f'\\label{{{m.group(1)}}}',
+        content,
+    )
+
     seen: dict[str, int] = {}
 
     def replace_label(m: re.Match) -> str:
@@ -286,7 +294,7 @@ def _dedup_labels(content: str) -> str:
         seen[label] = seen.get(label, 0) + 1
         if seen[label] == 1:
             return m.group(0)
-        return f'\\label{{{label}_{seen[label]}}}'
+        return f'\\label{{{label}{_DEDUP_SUFFIX}{seen[label]}}}'
 
     return re.sub(r'\\label\{([^}]+)\}', replace_label, content)
 

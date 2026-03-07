@@ -215,7 +215,7 @@ def remap_cjk_fonts(content: str) -> str:
 
     # Only replace font names inside CJK font commands to avoid false positives.
     cjk_cmd_pattern = re.compile(
-        r'(\\(?:setCJK(?:main|sans|mono)font|newCJKfontfamily\s*\\[a-z]+|setCJKfamilyfont\s*\{[^}]*\})'
+        r'(\\(?:setCJK(?:main|sans|mono)font|newCJKfontfamily\s*\\[a-zA-Z]+|setCJKfamilyfont\s*\{[^}]*\})'
         r'(?:\s*\[[^\]]*\])?\s*\{)([^}]+)(\})'
     )
 

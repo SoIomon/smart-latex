@@ -499,7 +499,8 @@ async def generate_latex_pipeline(
 
     # Generate chapters in parallel batches of 3
     chapter_batch_size = 8
-    chapter_results = [""] * total_chapters
+    chapter_results: list[str | None] = [None] * total_chapters
+    failed_chapters: dict[int, str] = {}
     completed_count = 0
 
     for batch_start in range(0, total_chapters, chapter_batch_size):
@@ -533,7 +534,8 @@ async def generate_latex_pipeline(
             if isinstance(result, Exception):
                 logger.warning(f"Failed to generate chapter {ch_idx + 1}: {result}")
                 top_cmd = section_commands["top"]
-                chapter_results[ch_idx] = f"\n\n{top_cmd}{{{chapters[ch_idx].get('title', '章节')}}}\n% 生成失败: {result}\n"
+                failed_chapters[ch_idx] = f"\n\n{top_cmd}{{{chapters[ch_idx].get('title', '章节')}}}\n% 生成失败: {result}\n"
+                chapter_results[ch_idx] = None
             else:
                 chapter_results[ch_idx] = extract_latex(result)
 
@@ -541,7 +543,7 @@ async def generate_latex_pipeline(
         validate_tasks = []
         validate_indices = []
         for i in range(batch_start, batch_end):
-            if not chapter_results[i].startswith("\n\n"):  # skip failed chapters
+            if chapter_results[i] is not None:  # skip failed chapters
                 validate_tasks.append(
                     _validate_and_fix_chapter(
                         preamble, chapter_results[i], i + 1,
@@ -570,7 +572,7 @@ async def generate_latex_pipeline(
         # Yield completed chapters in order
         for ch_idx in range(batch_start, batch_end):
             completed_count += 1
-            content = chapter_results[ch_idx]
+            content = chapter_results[ch_idx] if chapter_results[ch_idx] is not None else failed_chapters.get(ch_idx, "")
             full_latex += "\n\n" + content
             yield {"event": "chunk", "content": "\n\n" + content}
             yield {
