@@ -15,8 +15,9 @@ from app.core.llm.chains import (
     generate_chapter_stream,
     integrate_content,
     generate_latex_stream,
-    fix_chapter_latex_errors,
 )
+from app.core.compiler.error_parser import parse_xelatex_log
+from app.core.llm.fix_agent import fix_latex_content
 from app.core.llm.output_parsers import extract_latex
 from app.core.templates.registry import get_template, get_template_content, get_template_support_dirs
 from app.services.document_service import list_documents, get_document
@@ -233,6 +234,38 @@ def _build_default_preamble(outline: dict) -> str:
     return preamble
 
 
+_CHAPTER_START_MARKER = "% <<<CHAPTER_CONTENT_START>>>"
+_CHAPTER_END_MARKER = "% <<<CHAPTER_CONTENT_END>>>"
+
+
+def _strip_preamble_commands(content: str) -> tuple[str, bool]:
+    """Remove preamble-only commands that LLM sometimes puts in chapter content.
+
+    Returns (cleaned_content, was_modified).
+    """
+    import re as _re
+
+    lines = content.split('\n')
+    filtered = []
+    modified = False
+    for line in lines:
+        stripped = line.strip()
+        if _re.match(r'\\documentclass[\[\{]', stripped):
+            modified = True
+            continue
+        if _re.match(r'\\usepackage[\[\{]', stripped):
+            modified = True
+            continue
+        if stripped in (r'\begin{document}', r'\end{document}', r'\maketitle'):
+            modified = True
+            continue
+        if _re.match(r'\\(title|author|date)\{', stripped):
+            modified = True
+            continue
+        filtered.append(line)
+    return '\n'.join(filtered), modified
+
+
 async def _validate_and_fix_chapter(
     preamble: str,
     chapter_content: str,
@@ -242,74 +275,79 @@ async def _validate_and_fix_chapter(
 ) -> tuple[str, bool]:
     """Validate a chapter's LaTeX syntax and auto-fix if errors are found.
 
-    Wraps preamble + chapter + \\end{document}, runs xelatex -draftmode,
-    and if errors occur, calls LLM to fix the chapter content.
+    Uses a two-phase approach:
+    1. Regex pre-clean: strip preamble commands (\\usepackage etc.) from chapter body
+    2. If still failing, run the fix agent (ReAct with tools) for targeted repairs
 
     Returns (content, was_fixed).
     """
-    # Build a complete document for validation
-    full_doc = preamble + "\n\n" + chapter_content + "\n\n\\end{document}\n"
+    # Phase 1: Regex pre-clean common LLM mistakes
+    cleaned, was_stripped = _strip_preamble_commands(chapter_content)
+    if was_stripped:
+        logger.info("Chapter %d: stripped preamble commands from chapter body", chapter_index)
+        chapter_content = cleaned
 
+    # Validate
+    full_doc = preamble + "\n\n" + chapter_content + "\n\n\\end{document}\n"
     result = await validate_latex_syntax(full_doc, support_dirs=support_dirs)
 
     if result.success:
-        return chapter_content, False
+        return chapter_content, was_stripped
 
-    # Validation failed — try to fix
-    error_summary = "\n".join(result.errors[:10])  # Limit to 10 errors
-    logger.warning(
-        "Chapter %d syntax validation failed (%d errors): %s",
-        chapter_index,
-        len(result.errors),
-        error_summary[:200],
-    )
-
-    # If no errors were extracted, skip LLM fix — the failure is likely an
-    # environment issue (missing fonts, packages) rather than a syntax error.
-    if not result.errors:
+    # Parse structured errors from the log
+    parsed_errors = parse_xelatex_log(result.log)
+    if not parsed_errors:
         logger.warning(
-            "Chapter %d: validation returned rc!=0 but 0 extractable errors; "
-            "skipping LLM fix (likely environment issue). Log tail: %s",
+            "Chapter %d: validation failed but no extractable errors; "
+            "skipping fix (likely environment issue). Log tail: %s",
             chapter_index,
             result.log[-500:] if result.log else "(empty)",
         )
-        return chapter_content, False
+        return chapter_content, was_stripped
 
-    for attempt in range(max_fix_attempts):
-        try:
-            fixed_content = await fix_chapter_latex_errors(
-                chapter_content, error_summary
-            )
-            if not fixed_content or fixed_content == chapter_content:
-                logger.warning(
-                    "Chapter %d fix attempt %d returned unchanged content",
-                    chapter_index,
-                    attempt + 1,
-                )
-                break
+    logger.warning(
+        "Chapter %d: %d errors, running fix agent",
+        chapter_index, len(parsed_errors),
+    )
 
-            # Re-validate the fixed content
-            fixed_doc = preamble + "\n\n" + fixed_content + "\n\n\\end{document}\n"
-            re_result = await validate_latex_syntax(fixed_doc, support_dirs=support_dirs)
+    # Phase 2: Fix agent with markers for chapter extraction
+    marked_doc = (
+        preamble + "\n"
+        + _CHAPTER_START_MARKER + "\n"
+        + chapter_content + "\n"
+        + _CHAPTER_END_MARKER + "\n"
+        + "\\end{document}\n"
+    )
 
-            if re_result.success:
-                logger.info("Chapter %d fixed successfully on attempt %d", chapter_index, attempt + 1)
-                return fixed_content, True
+    try:
+        fixed_doc = await fix_latex_content(marked_doc, parsed_errors, max_turns=5)
+    except Exception as e:
+        logger.warning("Chapter %d: fix agent failed: %s", chapter_index, e)
+        return chapter_content, was_stripped
 
-            # Still has errors — update for next attempt
-            chapter_content = fixed_content
-            error_summary = "\n".join(re_result.errors[:10])
-            logger.warning(
-                "Chapter %d still has errors after fix attempt %d",
-                chapter_index,
-                attempt + 1,
-            )
-        except Exception as e:
-            logger.warning("Chapter %d fix attempt %d failed: %s", chapter_index, attempt + 1, e)
-            break
+    if not fixed_doc:
+        logger.warning("Chapter %d: fix agent returned no changes or unfixable", chapter_index)
+        return chapter_content, was_stripped
 
-    # Return best effort (possibly partially fixed)
-    return chapter_content, False
+    # Extract chapter content from markers
+    start_idx = fixed_doc.find(_CHAPTER_START_MARKER)
+    end_idx = fixed_doc.find(_CHAPTER_END_MARKER)
+    if start_idx == -1 or end_idx == -1:
+        logger.warning("Chapter %d: markers lost after agent fix", chapter_index)
+        return chapter_content, was_stripped
+
+    fixed_chapter = fixed_doc[start_idx + len(_CHAPTER_START_MARKER):end_idx].strip()
+
+    # Re-validate the fixed content
+    verify_doc = preamble + "\n\n" + fixed_chapter + "\n\n\\end{document}\n"
+    verify_result = await validate_latex_syntax(verify_doc, support_dirs=support_dirs)
+
+    if verify_result.success:
+        logger.info("Chapter %d: fixed by agent", chapter_index)
+        return fixed_chapter, True
+
+    logger.warning("Chapter %d: still has errors after agent fix", chapter_index)
+    return fixed_chapter, True  # return partially fixed content
 
 
 async def generate_latex_from_documents(

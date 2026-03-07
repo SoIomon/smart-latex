@@ -273,6 +273,7 @@ def _format_tool_call(name: str, args: dict) -> str:
 async def run_fix_agent_loop(
     latex_content: str,
     parsed_errors: list[ParsedError],
+    max_turns: int = MAX_FIX_TURNS,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the fix agent loop, yielding AgentEvents for SSE streaming.
 
@@ -305,7 +306,7 @@ async def run_fix_agent_loop(
 
     yield AgentEvent(type="thinking", data="正在分析编译错误...")
 
-    for turn in range(MAX_FIX_TURNS):
+    for turn in range(max_turns):
         try:
             response = await doubao_client.chat_with_tools(
                 messages=messages,
@@ -393,3 +394,21 @@ async def run_fix_agent_loop(
     if state.doc.modified:
         yield AgentEvent(type="latex", data=state.doc.to_latex())
     yield AgentEvent(type="done", data="")
+
+
+async def fix_latex_content(
+    latex_content: str,
+    parsed_errors: list[ParsedError],
+    max_turns: int = 5,
+) -> str | None:
+    """Run fix agent and return fixed content directly (non-streaming).
+
+    Returns the fixed LaTeX content, or None if unfixable/unchanged.
+    """
+    result = None
+    async for event in run_fix_agent_loop(latex_content, parsed_errors, max_turns=max_turns):
+        if event.type == "latex":
+            result = event.data
+        elif event.type == "unfixable":
+            return None
+    return result
