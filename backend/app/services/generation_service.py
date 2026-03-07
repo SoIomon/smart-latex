@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.compiler.engine import validate_latex_syntax, _fix_common_latex_issues
+from app.core.compiler.engine import validate_latex_syntax, _fix_common_latex_issues, _find_begin_document as _find_real_begin_document
 from app.core.llm.chains import (
     analyze_document,
     plan_outline,
@@ -88,26 +88,26 @@ def _get_template_rules(template_id: str) -> str:
     # Also include the template .tex.j2 content as reference for LaTeX structure
     tex_content = get_template_content(template_id)
     if tex_content:
-        # Extract preamble (documentclass to begin{document}) as formatting reference
+        # Extract preamble (documentclass to begin{document}) as formatting reference.
+        # Use _find_real_begin_document to skip \begin{document} inside comments.
         import re
-        preamble_match = re.search(
-            r'(\\documentclass.*?)(\\begin\{document\})',
-            tex_content, re.DOTALL
-        )
-        if preamble_match:
-            preamble = preamble_match.group(1).strip()
+        bd_pos = _find_real_begin_document(tex_content)
+        dc_match = re.search(r'\\documentclass', tex_content) if bd_pos is not None else None
+        if dc_match and bd_pos is not None:
+            preamble = tex_content[dc_match.start():bd_pos].strip()
             rules_parts.append(f"\n参考模板的 LaTeX 导言区设置（请保持一致的格式风格）：\n{preamble}")
 
         # Extract example body content for section hierarchy reference
-        body_match = re.search(
-            r'\\begin\{document\}(.*?)\\end\{document\}',
-            tex_content, re.DOTALL
-        )
-        if body_match:
-            body = body_match.group(1).strip()
+        if bd_pos is not None:
+            body_start = bd_pos + len(r'\begin{document}')
+            ed_match = re.search(r'\\end\{document\}', tex_content[body_start:])
+            body_text = tex_content[body_start:body_start + ed_match.start()].strip() if ed_match else None
+        else:
+            body_text = None
+        if body_text:
             # Extract section hierarchy examples (first few)
             section_examples = []
-            for m in re.finditer(r'(\\(?:chapter|section|subsection|subsubsection|paragraph|subparagraph)\{[^}]+\})', body):
+            for m in re.finditer(r'(\\(?:chapter|section|subsection|subsubsection|paragraph|subparagraph)\{[^}]+\})', body_text):
                 section_examples.append(m.group(1))
                 if len(section_examples) >= 8:
                     break

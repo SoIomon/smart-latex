@@ -13,6 +13,19 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _find_begin_document(content: str) -> int | None:
+    """Find the char offset of the *real* ``\\begin{document}`` (not inside a comment).
+
+    Returns ``None`` if no uncommented ``\\begin{document}`` exists.
+    """
+    for m in re.finditer(r'\\begin\{document\}', content):
+        line_start = content.rfind('\n', 0, m.start()) + 1
+        prefix = content[line_start:m.start()]
+        if '%' not in prefix:
+            return m.start()
+    return None
+
+
 @dataclass
 class CompileResult:
     success: bool = False
@@ -232,10 +245,12 @@ def _ensure_bundled_fonts(build_dir: Path) -> None:
 
 def _inject_missing_packages(content: str) -> str:
     """Auto-inject commonly needed packages when used but not loaded."""
-    if r'\begin{document}' not in content:
+    doc_idx = _find_begin_document(content)
+    if doc_idx is None:
         return content
 
     # Map: (command/env used in body) → package to inject
+    # NOTE: \multicolumn is a built-in LaTeX command — it does NOT need multicol.
     _PACKAGE_TRIGGERS = [
         (r'\toprule', 'booktabs'),
         (r'\midrule', 'booktabs'),
@@ -244,10 +259,8 @@ def _inject_missing_packages(content: str) -> str:
         (r'\begin{tabularx}', 'tabularx'),
         (r'\begin{multirow}', 'multirow'),
         (r'\multirow{', 'multirow'),
-        (r'\multicolumn{', 'multicol'),
     ]
 
-    doc_idx = content.index(r'\begin{document}')
     preamble = content[:doc_idx]
     body = content[doc_idx:]
 
@@ -333,7 +346,7 @@ def _fix_truncated_latex(content: str) -> str:
         # Ensure \end{document} is present
         if has_document and '\\end{document}' not in content:
             content = content.rstrip() + '\n\\end{document}\n'
-    elif '\\begin{document}' in content and '\\end{document}' not in content:
+    elif _find_begin_document(content) is not None and '\\end{document}' not in content:
         content = content.rstrip() + '\n\\end{document}\n'
 
     return content
@@ -434,9 +447,11 @@ async def compile_latex(
     # Calculate line offset introduced by _fix_common_latex_issues
     # (primarily _inject_missing_packages which inserts lines before \begin{document})
     line_offset = 0
-    if r'\begin{document}' in original_content and r'\begin{document}' in latex_content:
-        orig_line = original_content[: original_content.index(r'\begin{document}')].count('\n')
-        comp_line = latex_content[: latex_content.index(r'\begin{document}')].count('\n')
+    orig_bd = _find_begin_document(original_content)
+    comp_bd = _find_begin_document(latex_content)
+    if orig_bd is not None and comp_bd is not None:
+        orig_line = original_content[:orig_bd].count('\n')
+        comp_line = latex_content[:comp_bd].count('\n')
         line_offset = comp_line - orig_line
     # Persist offset so synctex API can correct line numbers
     (output_dir / "line_offset.txt").write_text(str(line_offset), encoding="utf-8")
