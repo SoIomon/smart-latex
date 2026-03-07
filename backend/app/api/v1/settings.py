@@ -13,7 +13,13 @@ from sqlalchemy import select
 from app.api.schemas.schemas import LLMConfigResponse, LLMConfigUpdate
 from app.config import settings
 from app.core.compiler.engine import _build_tex_env, _run_subprocess
-from app.core.fonts import get_cjk_fonts, _detect_platform_fontset, install_bundled_fonts
+from app.core.fonts import (
+    get_bundled_fonts_info,
+    get_cjk_fonts,
+    refresh_cjk_fonts,
+    _detect_platform_fontset,
+    install_bundled_fonts,
+)
 from app.core.llm.client import doubao_client, get_llm_config, refresh_llm_config
 from app.models.database import async_session
 from app.models.models import LLMConfig
@@ -299,6 +305,15 @@ async def run_diagnostics():
             suggestion="如需更好的排版效果，可安装系统原生中文字体（如 macOS 宋体/黑体）",
         ))
 
+    # Bundled fonts version info
+    bundled_info = get_bundled_fonts_info()
+    items.append(DiagnosticItem(
+        name="内置字体版本",
+        status="ok",
+        message=f"{bundled_info['source']} v{bundled_info['version']}",
+        detail=f"字体文件: {', '.join(bundled_info.get('files', []))}",
+    ))
+
     # 6. Quick compile test
     ok_xelatex = any(i.name.startswith("XeLaTeX") and i.status == "ok" for i in items)
     if ok_xelatex:
@@ -361,3 +376,22 @@ async def install_fonts():
     """Install bundled FandolFonts to the user's system font directory."""
     result = await asyncio.to_thread(install_bundled_fonts)
     return FontInstallResponse(**result)
+
+
+@router.post("/fonts/refresh", response_model=FontInstallResponse)
+async def refresh_fonts():
+    """Clear the font detection cache and re-detect available fonts.
+
+    Useful after installing fonts externally (e.g. via system package manager).
+    """
+    refresh_cjk_fonts()
+    fonts = await asyncio.to_thread(get_cjk_fonts)
+    return FontInstallResponse(
+        status="ok",
+        message=(
+            f"字体缓存已刷新。当前字体: "
+            f"宋体={fonts.songti}, 黑体={fonts.heiti}, "
+            f"楷体={fonts.kaiti}, 仿宋={fonts.fangsong}"
+            + ("（使用内置 Fandol 字体）" if fonts.is_fallback else "")
+        ),
+    )

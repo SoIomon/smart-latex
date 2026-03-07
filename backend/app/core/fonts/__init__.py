@@ -9,22 +9,25 @@ FandolFonts (open-source CJK fonts shipped with TeX Live).
 
 from __future__ import annotations
 
+import json
 import logging
 import platform
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Bundled fonts directory
+# Bundled fonts directory & version
 # ---------------------------------------------------------------------------
 
 BUNDLED_FONTS_DIR = Path(__file__).parent / "bundled"
+BUNDLED_FONTS_VERSION_FILE = BUNDLED_FONTS_DIR / "VERSION.json"
 
 # ---------------------------------------------------------------------------
 # Font map: fontset → semantic role → actual font name
@@ -96,21 +99,8 @@ _WINDOWS_FONT_FILES: dict[str, list[str]] = {
 }
 
 
-def _check_font_available(font_name: str) -> bool:
-    """Check if a font is available on the system (synchronous).
-
-    Uses fc-list on Unix. On Windows, checks known font file paths.
-    """
-    if platform.system() == "Windows":
-        candidates = _WINDOWS_FONT_FILES.get(font_name)
-        if candidates is None:
-            return True  # Unknown font, assume available
-        win_fonts = Path("C:/Windows/Fonts")
-        user_fonts = Path.home() / "AppData" / "Local" / "Microsoft" / "Windows" / "Fonts"
-        for fname in candidates:
-            if (win_fonts / fname).exists() or (user_fonts / fname).exists():
-                return True
-        return False
+def _check_font_available_fclist(font_name: str) -> bool:
+    """Check font availability using fc-list (works on all platforms with fontconfig)."""
     try:
         result = subprocess.run(
             ["fc-list", f":family={font_name}", "family"],
@@ -121,7 +111,48 @@ def _check_font_available(font_name: str) -> bool:
         return False
 
 
-@lru_cache(maxsize=1)
+def _check_font_available(font_name: str) -> bool:
+    """Check if a font is available on the system (synchronous).
+
+    On Windows: tries fc-list first (available with MiKTeX/TeX Live),
+    falls back to checking known font file paths.
+    On Unix: uses fc-list.
+    """
+    if platform.system() == "Windows":
+        # Try fc-list first (MiKTeX and TeX Live ship fontconfig)
+        if _check_font_available_fclist(font_name):
+            return True
+        # Fallback: check known font file paths
+        candidates = _WINDOWS_FONT_FILES.get(font_name)
+        if candidates is None:
+            return True  # Unknown font, assume available
+        win_fonts = Path("C:/Windows/Fonts")
+        user_fonts = Path.home() / "AppData" / "Local" / "Microsoft" / "Windows" / "Fonts"
+        for fname in candidates:
+            if (win_fonts / fname).exists() or (user_fonts / fname).exists():
+                return True
+        return False
+    return _check_font_available_fclist(font_name)
+
+
+# ---------------------------------------------------------------------------
+# TTL-based cache for get_cjk_fonts()
+# ---------------------------------------------------------------------------
+
+_cjk_fonts_cache: CJKFonts | None = None
+_cjk_fonts_cache_time: float = 0.0
+_cjk_fonts_cache_lock = threading.Lock()
+_CJK_FONTS_CACHE_TTL = 300.0  # 5 minutes
+
+
+def refresh_cjk_fonts() -> None:
+    """Clear the CJK fonts cache so the next call re-detects fonts."""
+    global _cjk_fonts_cache, _cjk_fonts_cache_time
+    with _cjk_fonts_cache_lock:
+        _cjk_fonts_cache = None
+        _cjk_fonts_cache_time = 0.0
+
+
 def get_cjk_fonts() -> CJKFonts:
     """Return CJK font names for the configured ``CJK_FONTSET``.
 
@@ -129,8 +160,17 @@ def get_cjk_fonts() -> CJKFonts:
     detected automatically. For each missing system font, the corresponding
     FandolFont is used as fallback.
 
-    Result is cached — ``CJK_FONTSET`` is fixed at startup.
+    Result is cached with a 5-minute TTL. Call ``refresh_cjk_fonts()``
+    to force re-detection (e.g. after installing fonts).
     """
+    global _cjk_fonts_cache, _cjk_fonts_cache_time
+
+    now = time.monotonic()
+    with _cjk_fonts_cache_lock:
+        if _cjk_fonts_cache is not None and (now - _cjk_fonts_cache_time) < _CJK_FONTS_CACHE_TTL:
+            return _cjk_fonts_cache
+
+    # Detect fonts outside the lock (may take a few seconds for fc-list)
     from app.config import settings
 
     fontset = getattr(settings, "CJK_FONTSET", "auto").lower()
@@ -156,13 +196,19 @@ def get_cjk_fonts() -> CJKFonts:
     else:
         resolved = dict(fandol_fonts)
 
-    return CJKFonts(
+    result = CJKFonts(
         songti=resolved["songti"],
         heiti=resolved["heiti"],
         kaiti=resolved["kaiti"],
         fangsong=resolved["fangsong"],
         is_fallback=is_fallback,
     )
+
+    with _cjk_fonts_cache_lock:
+        _cjk_fonts_cache = result
+        _cjk_fonts_cache_time = time.monotonic()
+
+    return result
 
 
 def resolve_cjk_font_name(name: str) -> str:
@@ -247,6 +293,26 @@ def get_bundled_fonts_dir() -> Path:
     return BUNDLED_FONTS_DIR
 
 
+def get_bundled_fonts_info() -> dict[str, str | list[str]]:
+    """Return version and file list for bundled fonts.
+
+    Reads ``VERSION.json`` from the bundled fonts directory.
+    """
+    info: dict[str, str | list[str]] = {
+        "version": "unknown",
+        "source": "FandolFonts (TeX Live)",
+        "files": [],
+    }
+    if BUNDLED_FONTS_VERSION_FILE.exists():
+        try:
+            data = json.loads(BUNDLED_FONTS_VERSION_FILE.read_text(encoding="utf-8"))
+            info.update(data)
+        except (json.JSONDecodeError, OSError):
+            pass
+    info["files"] = sorted(f.name for f in BUNDLED_FONTS_DIR.glob("*.otf"))
+    return info
+
+
 def install_bundled_fonts() -> dict[str, str]:
     """Install bundled FandolFonts to the user's system font directory.
 
@@ -281,7 +347,14 @@ def install_bundled_fonts() -> dict[str, str]:
                 pass
 
         # Clear cached result so next call picks up new fonts
-        get_cjk_fonts.cache_clear()
+        refresh_cjk_fonts()
+
+        if os_name == "Darwin":
+            logger.info(
+                "Fonts installed to %s. Note: macOS fontspec uses "
+                "family names from ~/Library/Fonts, not OSFONTDIR.",
+                target_dir,
+            )
 
         if installed:
             return {
