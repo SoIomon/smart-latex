@@ -327,36 +327,19 @@ def _fix_centering_in_tabularx(content: str) -> str:
 
 
 def _fix_truncated_latex(content: str) -> str:
-    """Detect and repair truncated LaTeX output from LLM."""
-    # Track open environments
-    open_envs: list[str] = []
-    for m in re.finditer(r'\\(begin|end)\{([^}]+)\}', content):
-        action, env_name = m.group(1), m.group(2)
-        if action == 'begin':
-            open_envs.append(env_name)
-        elif action == 'end' and open_envs and open_envs[-1] == env_name:
-            open_envs.pop()
+    """Ensure \\end{document} exists when \\begin{document} is present.
 
-    # If there are unclosed environments, close them in reverse order
-    if open_envs:
-        # Remove 'document' from the list — we'll handle it separately
-        has_document = False
-        closings = []
-        for env in reversed(open_envs):
-            if env == 'document':
-                has_document = True
-            else:
-                closings.append(f'\\end{{{env}}}')
+    Previously this tried to auto-close all unclosed environments by tracking
+    a begin/end stack.  That approach is fragile — a simple stack cannot handle
+    mismatched or nested environments correctly, and blindly appending wrong
+    ``\\end{}`` tags often makes the document *worse*.  Environment mismatches
+    are better left to the fix agent which can reason about context.
 
-        if closings:
-            content = content.rstrip() + '\n' + '\n'.join(closings) + '\n'
-
-        # Ensure \end{document} is present
-        if has_document and '\\end{document}' not in content:
-            content = content.rstrip() + '\n\\end{document}\n'
-    elif _find_begin_document(content) is not None and '\\end{document}' not in content:
+    Now we only guarantee that ``\\end{document}`` is present when
+    ``\\begin{document}`` is found.
+    """
+    if _find_begin_document(content) is not None and '\\end{document}' not in content:
         content = content.rstrip() + '\n\\end{document}\n'
-
     return content
 
 
@@ -618,8 +601,8 @@ def _extract_errors(log: str) -> list[str]:
         # Standard TeX errors (e.g. "! Undefined control sequence.")
         if stripped.startswith("!"):
             errors.append(stripped)
-        # Lines containing "Error" (e.g. "Package fontspec Error:")
-        elif "Error" in stripped:
+        # Package/Class/LaTeX errors (e.g. "Package fontspec Error:", "LaTeX Error:")
+        elif re.search(r'(?:Package|Class|LaTeX)\s+\S*\s*Error', stripped):
             errors.append(stripped)
         # Font-related failures that may lack "!" prefix
         elif "nullfont" in stripped or "not loadable" in stripped:

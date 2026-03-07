@@ -95,6 +95,10 @@ def _get_template_rules(template_id: str) -> str:
         dc_match = re.search(r'\\documentclass', tex_content) if bd_pos is not None else None
         if dc_match and bd_pos is not None:
             preamble = tex_content[dc_match.start():bd_pos].strip()
+            # Strip Jinja2 custom delimiters so LLM doesn't see raw template syntax
+            preamble = re.sub(r'<<\s*.*?\s*>>', '', preamble)
+            preamble = re.sub(r'<%.*?%>', '', preamble)
+            preamble = re.sub(r'<#.*?#>', '', preamble)
             rules_parts.append(f"\n参考模板的 LaTeX 导言区设置（请保持一致的格式风格）：\n{preamble}")
 
         # Extract example body content for section hierarchy reference
@@ -131,8 +135,8 @@ def _build_preamble_from_template(outline: dict, template_id: str) -> str:
     if not tex_content:
         return _build_default_preamble(outline)
 
-    doc_begin_match = re.search(r'\\begin\{document\}', tex_content)
-    if not doc_begin_match:
+    doc_begin_pos = _find_real_begin_document(tex_content)
+    if doc_begin_pos is None:
         return _build_default_preamble(outline)
 
     # Render the full template with Jinja2 using outline variables as context.
