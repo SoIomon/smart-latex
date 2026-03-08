@@ -203,9 +203,9 @@ def _merge_chunk_analyses(chunk_results: list, filename: str) -> dict:
         if v.get("type") and v["type"] != "其他" and doc_type == "其他":
             doc_type = v["type"]
 
-    # Abstract: concatenate, cap at 500 chars
+    # Abstract: concatenate from all chunks
     abstract_parts = [v.get("abstract", "") for v in valid if v.get("abstract")]
-    merged_abstract = " ".join(abstract_parts)[:500]
+    merged_abstract = " ".join(abstract_parts)
 
     # Importance: take the highest
     importance_order = {"高": 3, "中": 2, "低": 1}

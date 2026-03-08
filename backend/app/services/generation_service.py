@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -23,6 +24,128 @@ from app.core.templates.registry import get_template, get_template_content, get_
 from app.services.document_service import list_documents, get_document
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Content slicing — extract relevant portions of a document for a chapter
+# ---------------------------------------------------------------------------
+
+def _split_document_by_headings(
+    content: str, headings: list[str],
+) -> list[tuple[str, str]]:
+    """Split document content into (heading, body) pairs using analysis headings.
+
+    Returns a list of (heading, section_text) tuples.  The first entry may have
+    heading="" for content before the first heading.
+    """
+    if not headings:
+        return [("", content)]
+
+    # Build a regex that matches headings at the start of a line, optionally
+    # preceded by numbering like "1.1" or "第一章".  We require the heading to
+    # be the *main content* of the line (not buried inside a sentence or an
+    # [IMAGE: ...] tag) by anchoring to line start with optional numbering.
+    escaped = [re.escape(h) for h in headings if h and h != "全文"]
+    if not escaped:
+        return [("", content)]
+
+    # Match: line_start + optional_numbering + heading_text
+    # Optional numbering: "1.2.3 ", "第X章 ", "附录A " etc.
+    numbering_prefix = r"(?:[\d]+(?:\.[\d]+)*\.?\s*|第.{1,4}[章节]\s*|附录.?\s*)?"
+    pattern = re.compile(
+        r"^" + numbering_prefix + r"(" + "|".join(escaped) + r")\s*$",
+        re.MULTILINE,
+    )
+
+    splits: list[tuple[str, int]] = []  # (heading, start_pos)
+    for m in pattern.finditer(content):
+        matched_heading = m.group(1)
+        splits.append((matched_heading, m.start()))
+
+    if not splits:
+        return [("", content)]
+
+    result: list[tuple[str, str]] = []
+    # Content before first heading
+    if splits[0][1] > 0:
+        result.append(("", content[: splits[0][1]]))
+
+    for i, (heading, start) in enumerate(splits):
+        end = splits[i + 1][1] if i + 1 < len(splits) else len(content)
+        result.append((heading, content[start:end]))
+
+    return result
+
+
+def _extract_relevant_content(
+    full_content: str,
+    chapter: dict,
+    analysis: dict,
+) -> str:
+    """Extract the portion of a source document relevant to a given chapter.
+
+    Uses analysis headings to split the document, then matches against the
+    chapter description to pick the most relevant sections.  Falls back to
+    the full document content if matching fails.
+    """
+    # Collect headings from analysis
+    headings = [s.get("heading", "") for s in analysis.get("sections", [])]
+    sections = _split_document_by_headings(full_content, headings)
+
+    if len(sections) <= 1:
+        # Document has no recognisable structure — return full content
+        return full_content
+
+    # Score each section against the chapter title + description + subsections
+    chapter_text = (
+        chapter.get("title", "")
+        + " " + chapter.get("description", "")
+        + " " + " ".join(
+            sub.get("title", "") + " " + sub.get("description", "")
+            for sub in chapter.get("subsections", [])
+        )
+    ).lower()
+
+    # Extract keywords (Chinese chars + ASCII words, >= 2 chars)
+    keywords = set(re.findall(r"[\u4e00-\u9fff]{2,}|[a-zA-Z0-9]{2,}", chapter_text))
+
+    scored: list[tuple[float, int]] = []
+    for i, (heading, body) in enumerate(sections):
+        section_text = (heading + " " + body[:500]).lower()
+        hits = sum(1 for kw in keywords if kw in section_text)
+        score = hits / max(len(keywords), 1)
+        scored.append((score, i))
+
+    scored.sort(key=lambda x: -x[0])
+
+    # Pick sections with score > 0, or fall back to full content
+    selected_indices = sorted(
+        idx for score, idx in scored if score > 0
+    )
+
+    if not selected_indices:
+        return full_content
+
+    # Assemble selected sections (preserve document order)
+    parts: list[str] = []
+    for idx in selected_indices:
+        parts.append(sections[idx][1])
+
+    result = "\n".join(parts)
+
+    # If we selected less than 30% of the document, also include some
+    # surrounding context (the section before and after each selected one)
+    if len(result) < len(full_content) * 0.3:
+        context_indices = set(selected_indices)
+        for idx in selected_indices:
+            if idx > 0:
+                context_indices.add(idx - 1)
+            if idx < len(sections) - 1:
+                context_indices.add(idx + 1)
+        context_parts = [sections[i][1] for i in sorted(context_indices)]
+        result = "\n".join(context_parts)
+
+    return result
 
 
 def _detect_document_class(template_id: str) -> str:
@@ -609,7 +732,8 @@ async def generate_latex_pipeline(
 
     yield {"event": "chunk", "content": preamble}
 
-    # Prepare source docs for each chapter (no analysis — only raw content)
+    # Prepare source docs for each chapter — extract relevant portions
+    # using analysis headings instead of blindly truncating.
     chapter_sources = []
     for chapter in chapters:
         source_doc_indices = chapter.get("source_docs", [])
@@ -617,9 +741,13 @@ async def generate_latex_pipeline(
         for idx in source_doc_indices:
             if 1 <= idx <= total_docs:
                 doc = documents[idx - 1]
+                analysis = analyses[idx - 1] if idx - 1 < len(analyses) else {}
+                relevant = _extract_relevant_content(
+                    doc["content"], chapter, analysis,
+                )
                 source_docs.append({
                     "filename": doc["filename"],
-                    "content": doc["content"],
+                    "content": relevant,
                 })
         chapter_sources.append(source_docs)
 

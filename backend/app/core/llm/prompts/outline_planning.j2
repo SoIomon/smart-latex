@@ -9,7 +9,7 @@
 - 章节数：{{ analysis.sections | length }}
 - 重要性：{{ analysis.importance }}
 {% for sec in analysis.sections %}
-  - {{ sec.heading }}：{{ sec.summary[:100] }}
+  - {{ sec.heading }}：{{ sec.summary }}
 {% endfor %}
 {% endfor %}
 
