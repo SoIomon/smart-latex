@@ -17,6 +17,7 @@ from app.core.fonts import (
     get_bundled_fonts_info,
     get_cjk_fonts,
     refresh_cjk_fonts,
+    force_fallback,
     _detect_platform_fontset,
     install_bundled_fonts,
 )
@@ -189,6 +190,30 @@ async def _check_font(font_name: str, env: dict) -> tuple[bool, str]:
             return False, "fc-list timed out (5s)"
 
 
+async def _refresh_font_database(env: dict) -> None:
+    """Run platform-specific commands to refresh the font database.
+
+    - fontconfig (all platforms): fc-cache -f
+    - MiKTeX (Windows): initexmf --update-fndb
+    """
+    # fc-cache (fontconfig)
+    try:
+        await _run_subprocess(["fc-cache", "-f"], cwd=".", env=env, timeout=30)
+        logger.info("fc-cache -f completed")
+    except Exception as e:
+        logger.debug("fc-cache skipped: %s", e)
+
+    # MiKTeX font database
+    if platform.system() == "Windows":
+        try:
+            await _run_subprocess(
+                ["initexmf", "--update-fndb"], cwd=".", env=env, timeout=30,
+            )
+            logger.info("initexmf --update-fndb completed")
+        except Exception as e:
+            logger.debug("initexmf skipped: %s", e)
+
+
 @router.get("/diagnostics", response_model=DiagnosticsResponse)
 async def run_diagnostics():
     """Run environment diagnostics: platform, LaTeX, fonts, etc."""
@@ -283,11 +308,44 @@ async def run_diagnostics():
                 name=f"字体 · {role}",
                 status="warning",
                 message=f"未检测到 {font_name}",
-                suggestion="点击下方「安装内置字体」可一键安装 FandolFonts 开源中文字体",
                 detail=font_detail,
             ))
 
-    if not all_fonts_ok:
+    # Auto-fix: when platform fonts fail, install FandolFonts and force fallback
+    if not all_fonts_ok and not is_fallback:
+        logger.info("Platform fonts not usable by XeLaTeX, auto-installing FandolFonts...")
+        install_result = await asyncio.to_thread(install_bundled_fonts)
+        # Also try to refresh fontconfig / MiKTeX font DB
+        await _refresh_font_database(env)
+        fonts = force_fallback()
+        is_fallback = True
+
+        items.append(DiagnosticItem(
+            name="字体自动修复",
+            status="ok",
+            message=f"已自动安装内置 FandolFonts 并切换到降级模式",
+            detail=install_result.get("message", ""),
+        ))
+
+        # Re-check Fandol fonts
+        fandol_roles = [
+            ("宋体", fonts.songti),
+            ("黑体", fonts.heiti),
+            ("楷体", fonts.kaiti),
+            ("仿宋", fonts.fangsong),
+        ]
+        fandol_checks = await asyncio.gather(
+            *[_check_font(f[1], env) for f in fandol_roles]
+        )
+        for (role, font_name), (available, _detail) in zip(fandol_roles, fandol_checks):
+            if available:
+                items.append(DiagnosticItem(
+                    name=f"字体 · {role}（修复后）",
+                    status="ok",
+                    message=f"{font_name} ✓（内置 Fandol 字体）",
+                ))
+
+    if not all_fonts_ok and not is_fallback:
         items.append(DiagnosticItem(
             name="字体集配置",
             status="warning",
@@ -301,7 +359,7 @@ async def run_diagnostics():
         items.append(DiagnosticItem(
             name="字体集配置",
             status="ok",
-            message=f"使用内置 FandolFonts 字体（自动降级）",
+            message="使用内置 FandolFonts 字体（自动降级）",
             suggestion="如需更好的排版效果，可安装系统原生中文字体（如 macOS 宋体/黑体）",
         ))
 

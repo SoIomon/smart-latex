@@ -153,6 +153,28 @@ def refresh_cjk_fonts() -> None:
         _cjk_fonts_cache_time = 0.0
 
 
+def force_fallback() -> CJKFonts:
+    """Force the CJK font system to use bundled FandolFonts.
+
+    Use this when platform fonts exist on disk but XeLaTeX/fontspec
+    cannot actually load them (common on MiKTeX).
+    """
+    global _cjk_fonts_cache, _cjk_fonts_cache_time
+    fandol = _FONT_MAPS["fandol"]
+    result = CJKFonts(
+        songti=fandol["songti"],
+        heiti=fandol["heiti"],
+        kaiti=fandol["kaiti"],
+        fangsong=fandol["fangsong"],
+        is_fallback=True,
+    )
+    with _cjk_fonts_cache_lock:
+        _cjk_fonts_cache = result
+        _cjk_fonts_cache_time = time.monotonic()
+    logger.info("Forced CJK fonts to FandolFonts fallback mode")
+    return result
+
+
 def get_cjk_fonts() -> CJKFonts:
     """Return CJK font names for the configured ``CJK_FONTSET``.
 
