@@ -26,7 +26,7 @@ from app.core.llm.tools import (
 
 logger = logging.getLogger(__name__)
 
-MAX_REVIEW_TURNS = 30
+MAX_REVIEW_TURNS = 15
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "review_agent_system.j2"
 
