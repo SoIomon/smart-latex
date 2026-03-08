@@ -159,6 +159,8 @@ async def upload_document(
     db: AsyncSession,
     project_id: str,
     file: UploadFile,
+    *,
+    content: bytes | None = None,
 ) -> Document:
     original_name = file.filename or "unknown"
     ext = Path(original_name).suffix.lower()
@@ -169,7 +171,8 @@ async def upload_document(
     doc_dir.mkdir(parents=True, exist_ok=True)
     file_path = doc_dir / unique_name
 
-    content = await file.read()
+    if content is None:
+        content = await file.read()
     file_path.write_bytes(content)
 
     # Parse content

@@ -28,14 +28,12 @@ async def upload_document(
             detail=f"Unsupported file type '{ext}'. Supported: {supported}",
         )
 
-    # Check file size by reading content (the service will re-read via file object)
+    # Read content once for size check, then pass to service
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large. Max 50MB.")
-    # Seek back so service layer can read the file
-    await file.seek(0)
 
-    doc = await document_service.upload_document(db, project.id, file)
+    doc = await document_service.upload_document(db, project.id, file, content=content)
     return doc
 
 
