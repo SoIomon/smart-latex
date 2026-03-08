@@ -56,10 +56,11 @@
 11. 尽量保留源文档中的具体数据、参数、公式，不要用"等"或"..."省略
 12. 如需切换字体，使用 \songti、\heiti、\kaishu、\fangsong 等 ctex 预定义的字体切换命令即可
 13. 源文档中的 [IMAGE: 文件名, 描述: 图片描述, width=宽度cm] 占位符表示原文档中的图片。处理规则：
+   **【最重要】文件名必须原样使用，严禁修改、重命名或编造文件名！** 例如占位符是 [IMAGE: figure_001.png, ...] 则必须写 images/figure_001.png，绝对不能改成 images/system_architecture.png 之类的语义名。
    a) figure 环境结构（严格按此格式，不得在 figure 内添加任何额外文字）：
       \begin{figure}[htbp]
         \centering
-        \includegraphics[width=宽度]{images/文件名}
+        \includegraphics[width=宽度]{images/文件名}  % 文件名必须与占位符中的完全一致！
         \caption{简短标题}
         \label{fig:ch{{ chapter_index }}_文件名去掉扩展名}
       \end{figure}

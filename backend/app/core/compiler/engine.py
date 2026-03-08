@@ -247,6 +247,37 @@ def _ensure_bundled_fonts(build_dir: Path) -> None:
 
 
 
+def _fix_missing_images(content: str, build_dir: Path) -> str:
+    """Replace \\includegraphics references to non-existent files with a placeholder.
+
+    LLMs sometimes rename image files (e.g. figure_001.png → system_architecture.png).
+    Instead of letting XeLaTeX crash, replace with a text placeholder so the rest
+    of the document compiles successfully.
+    """
+    pattern = re.compile(
+        r'\\includegraphics\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}'
+    )
+
+    def _check_and_fix(m: re.Match) -> str:
+        img_path = m.group(1).strip()
+        resolved = build_dir / img_path
+        if resolved.exists():
+            return m.group(0)  # file exists, keep as-is
+
+        logger.warning(
+            "_fix_missing_images: '%s' not found in %s, replacing with placeholder",
+            img_path, build_dir,
+        )
+        # Extract just the filename for the placeholder text
+        fname = Path(img_path).name
+        return (
+            r'\fbox{\parbox{0.6\textwidth}{\centering\small '
+            rf'[图片缺失: {fname}]}}'
+        )
+
+    return pattern.sub(_check_and_fix, content)
+
+
 _DEDUP_SUFFIX = '__dup'
 
 
@@ -409,6 +440,7 @@ async def compile_latex(
         _copy_support_dirs(support_dirs, output_dir)
     _ensure_bundled_fonts(output_dir)
     latex_content = _fix_common_latex_issues(latex_content)
+    latex_content = _fix_missing_images(latex_content, output_dir)
 
     tex_path = output_dir / "document.tex"
     tex_path.write_text(latex_content, encoding="utf-8")
@@ -508,6 +540,7 @@ async def validate_latex_syntax(
             _copy_support_dirs(support_dirs, work_dir)
         _ensure_bundled_fonts(work_dir)
         latex_content = _fix_common_latex_issues(latex_content)
+        latex_content = _fix_missing_images(latex_content, work_dir)
         tex_path = work_dir / "validate.tex"
         tex_path.write_text(latex_content, encoding="utf-8")
 
