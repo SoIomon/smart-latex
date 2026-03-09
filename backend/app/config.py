@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     STORAGE_DIR: str = "./storage"
     LATEX_CMD: str = "latexmk"
 
-    CJK_FONTSET: str = "fandol"  # fandol / auto / mac / windows / linux
+    CJK_FONTSET: str = "auto"  # auto / mac / windows / linux / fandol
 
     CORS_ORIGINS: list[str] = ["http://localhost:15173", "http://127.0.0.1:15173"]
 

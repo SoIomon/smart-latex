@@ -178,10 +178,9 @@ def force_fallback() -> CJKFonts:
 def get_cjk_fonts() -> CJKFonts:
     """Return CJK font names for the configured ``CJK_FONTSET``.
 
-    When ``CJK_FONTSET`` is ``"fandol"`` (the default), bundled FandolFonts
-    are used directly. When set to ``"auto"``, the platform is detected
-    automatically. For each missing system font, the corresponding FandolFont
-    is used as fallback.
+    When ``CJK_FONTSET`` is ``"auto"`` (the default), the platform is
+    detected automatically. For each missing system font, the corresponding
+    FandolFont is used as fallback.
 
     Result is cached with a 5-minute TTL. Call ``refresh_cjk_fonts()``
     to force re-detection (e.g. after installing fonts).
@@ -196,7 +195,7 @@ def get_cjk_fonts() -> CJKFonts:
     # Detect fonts outside the lock (may take a few seconds for fc-list)
     from app.config import settings
 
-    fontset = getattr(settings, "CJK_FONTSET", "fandol").lower()
+    fontset = getattr(settings, "CJK_FONTSET", "auto").lower()
     if fontset == "auto":
         fontset = _detect_platform_fontset()
 

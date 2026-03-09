@@ -21,7 +21,7 @@ def cleanup_sandbox(sandbox_dir: Path):
     """
     if not sandbox_dir.exists():
         return
-    _KEEP_SUFFIXES = {".pdf", ".tex", ".aux"}
+    _KEEP_SUFFIXES = {".pdf", ".tex", ".aux", ".otf"}
     for f in sandbox_dir.iterdir():
         try:
             if f.is_dir():
